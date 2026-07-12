@@ -1,246 +1,251 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-import json
+from sqlalchemy.orm import sessionmaker, relationship
 import datetime
 import random
-import os
+import hashlib
 
 # -------- НАСТРОЙКА БАЗЫ ДАННЫХ --------
 Base = declarative_base()
 engine = create_engine('sqlite:///dnd_game.db', connect_args={'check_same_thread': False})
 Session = sessionmaker(bind=engine)
 
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    password_hash = Column(String)
+    role = Column(String, default='player')
+    created_at = Column(DateTime, default=datetime.datetime.now)
+
+class Campaign(Base):
+    __tablename__ = 'campaigns'
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    description = Column(String, default='')
+    gm_id = Column(Integer, ForeignKey('users.id'))
+    created_at = Column(DateTime, default=datetime.datetime.now)
+    is_active = Column(Boolean, default=True)
+    gm = relationship("User")
+
 class Player(Base):
     __tablename__ = 'players'
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
+    name = Column(String)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'))
+    user_id = Column(Integer, ForeignKey('users.id'))
     hp = Column(Integer, default=20)
     max_hp = Column(Integer, default=20)
     ac = Column(Integer, default=12)
     level = Column(Integer, default=1)
-    x = Column(Integer, default=0)  # Позиция на карте
+    x = Column(Integer, default=0)
     y = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.now)
+    user = relationship("User")
+    campaign = relationship("Campaign")
 
 Base.metadata.create_all(engine)
 
 # -------- НАСТРОЙКА СЕРВЕРА --------
 app = FastAPI()
-active_connections = {}
-game_state = {
-    "players": {},  # {имя: {hp, max_hp, ac, level, x, y}}
-    "initiative": [],  # список имён в порядке хода
-    "turn_index": 0,   # текущий игрок в инициативе
-    "map_size": 10     # карта 10x10
-}
 
-# -------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ --------
-def get_or_create_player(name):
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def get_user_by_username(username):
     session = Session()
-    player = session.query(Player).filter_by(name=name).first()
-    if not player:
-        player = Player(name=name)
-        session.add(player)
-        session.commit()
+    user = session.query(User).filter_by(username=username).first()
     session.close()
-    return player
+    return user
 
-def save_player_to_db(name, hp, ac, level, x, y):
+def create_user(username, password, role='player'):
     session = Session()
-    player = session.query(Player).filter_by(name=name).first()
-    if player:
-        player.hp = hp
-        player.ac = ac
-        player.level = level
-        player.x = x
-        player.y = y
-        session.commit()
+    user = User(username=username, password_hash=hash_password(password), role=role)
+    session.add(user)
+    session.commit()
     session.close()
+    return user
 
-async def broadcast(message, exclude=None):
-    for name, connection in active_connections.items():
-        if name != exclude:
-            try:
-                await connection.send_text(message)
-            except:
-                pass
+def get_campaigns_for_user(user_id):
+    session = Session()
+    campaigns = session.query(Campaign).filter_by(gm_id=user_id).all()
+    session.close()
+    return campaigns
 
-def get_map_state():
-    """Создаёт текстовое представление карты"""
-    size = game_state["map_size"]
-    grid = [["⬜" for _ in range(size)] for _ in range(size)]
+def create_campaign(name, gm_id, description=''):
+    session = Session()
+    campaign = Campaign(name=name, gm_id=gm_id, description=description)
+    session.add(campaign)
+    session.commit()
+    session.close()
+    return campaign
+
+# -------- СТРАНИЦЫ (HTML как строки) --------
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return RedirectResponse(url="/login")
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page():
+    return HTMLResponse(content="""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Регистрация</title>
+        <style>
+            body { background: #1a1a2e; color: #eee; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .box { background: #2a2a3e; padding: 40px; border-radius: 12px; width: 300px; }
+            input, select, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 14px; }
+            input, select { background: #3a3a4e; color: #fff; }
+            button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
+            .error { color: #ff6b6b; }
+            a { color: #c7a252; text-decoration: none; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h2>Регистрация</h2>
+            <form method="post" action="/register">
+                <input type="text" name="username" placeholder="Имя пользователя" required>
+                <input type="password" name="password" placeholder="Пароль" required>
+                <select name="role">
+                    <option value="player">Игрок</option>
+                    <option value="gm">Мастер (GM)</option>
+                </select>
+                <button type="submit">Зарегистрироваться</button>
+            </form>
+            <p style="text-align: center; margin-top: 10px;">
+                Уже есть аккаунт? <a href="/login">Войти</a>
+            </p>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/register")
+async def register(username: str = Form(...), password: str = Form(...), role: str = Form("player")):
+    existing = get_user_by_username(username)
+    if existing:
+        return HTMLResponse(content="<h2>Ошибка: Имя уже занято</h2><a href='/register'>Назад</a>", status_code=400)
+    user = create_user(username, password, role)
+    return RedirectResponse(url=f"/dashboard/{user.id}", status_code=303)
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return HTMLResponse(content="""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Вход в D&D</title>
+        <style>
+            body { background: #1a1a2e; color: #eee; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .box { background: #2a2a3e; padding: 40px; border-radius: 12px; width: 300px; }
+            input, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 14px; }
+            input { background: #3a3a4e; color: #fff; }
+            button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
+            .error { color: #ff6b6b; }
+            a { color: #c7a252; text-decoration: none; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h2>Вход в D&D</h2>
+            <form method="post" action="/login">
+                <input type="text" name="username" placeholder="Имя пользователя" required>
+                <input type="password" name="password" placeholder="Пароль" required>
+                <button type="submit">Войти</button>
+            </form>
+            <p style="text-align: center; margin-top: 10px;">
+                Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+            </p>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    user = get_user_by_username(username)
+    if not user or user.password_hash != hash_password(password):
+        return HTMLResponse(content="<h2>Ошибка: Неверное имя или пароль</h2><a href='/login'>Назад</a>", status_code=400)
+    return RedirectResponse(url=f"/dashboard/{user.id}", status_code=303)
+
+@app.get("/dashboard/{user_id}", response_class=HTMLResponse)
+async def dashboard(user_id: int):
+    campaigns = get_campaigns_for_user(user_id)
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Главное меню</title>
+        <style>
+            body { background: #1a1a2e; color: #eee; font-family: Arial; max-width: 800px; margin: 40px auto; padding: 20px; }
+            .card { background: #2a2a3e; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+            input, textarea, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 14px; }
+            input, textarea { background: #3a3a4e; color: #fff; }
+            button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
+            .campaign { background: #3a3a4e; padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+            .campaign a { color: #c7a252; text-decoration: none; font-weight: bold; }
+            .flex { display: flex; gap: 10px; align-items: center; }
+        </style>
+    </head>
+    <body>
+        <h2>Главное меню</h2>
+        <div class="card">
+            <h3>Создать новую кампанию</h3>
+            <form method="post" action="/create_campaign">
+                <input type="hidden" name="gm_id" value=""" + str(user_id) + """>
+                <input type="text" name="name" placeholder="Название кампании" required>
+                <textarea name="description" placeholder="Описание (необязательно)"></textarea>
+                <button type="submit">Создать</button>
+            </form>
+        </div>
+        <div class="card">
+            <h3>Мои кампании</h3>
+    """
+    if campaigns:
+        for c in campaigns:
+            html += f"""
+                <div class="campaign">
+                    <div>
+                        <strong>{c.name}</strong>
+                        <div style="font-size: 12px; color: #aaa;">{c.description}</div>
+                    </div>
+                    <div class="flex">
+                        <a href="/game/{c.id}">Войти</a>
+                    </div>
+                </div>
+            """
+    else:
+        html += '<p style="color: #aaa;">У вас пока нет кампаний. Создайте первую!</p>'
     
-    # Расставляем игроков
-    for name, data in game_state["players"].items():
-        x, y = data.get("x", 0), data.get("y", 0)
-        if 0 <= x < size and 0 <= y < size:
-            grid[y][x] = f"👤{name[0]}"
-    
-    # Добавляем рамку
-    result = "```\nКарта:\n"
-    result += "   " + " ".join([str(i) for i in range(size)]) + "\n"
-    for y, row in enumerate(grid):
-        result += f"{y:2} " + " ".join(row) + "\n"
-    result += "```"
-    return result
+    html += """
+        </div>
+        <div style="margin-top: 20px;">
+            <a href="/login" style="color: #ff6b6b;">Выйти</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
-# -------- ОСНОВНЫЕ ЭНДПОИНТЫ --------
-@app.get("/")
-async def root():
-    return {"message": "D&D Сервер v3.0 с картой"}
+@app.post("/create_campaign")
+async def create_campaign_endpoint(name: str = Form(...), gm_id: int = Form(...), description: str = Form("")):
+    campaign = create_campaign(name, gm_id, description)
+    return RedirectResponse(url=f"/dashboard/{gm_id}", status_code=303)
 
-@app.get("/players")
-async def get_players():
-    session = Session()
-    players = session.query(Player).all()
-    result = [{"name": p.name, "hp": p.hp, "max_hp": p.max_hp, "ac": p.ac, "level": p.level, "x": p.x, "y": p.y} for p in players]
-    session.close()
-    return result
-
-@app.websocket("/ws/{player_name}")
-async def websocket_endpoint(websocket: WebSocket, player_name: str):
+# -------- ИГРОВОЙ ВЕБСОКЕТ (ДЛЯ ТЕСТА) --------
+@app.websocket("/ws/{campaign_id}/{player_name}")
+async def game_websocket(websocket: WebSocket, campaign_id: int, player_name: str):
     await websocket.accept()
-    
-    # Загружаем данные игрока
-    player_data = get_or_create_player(player_name)
-    
-    active_connections[player_name] = websocket
-    game_state["players"][player_name] = {
-        "hp": player_data.hp,
-        "max_hp": player_data.max_hp,
-        "ac": player_data.ac,
-        "level": player_data.level,
-        "x": player_data.x,
-        "y": player_data.y
-    }
-    
-    await broadcast(f"Игрок {player_name} присоединился к столу!", exclude=player_name)
-    await websocket.send_text(f"👋 Добро пожаловать, {player_name}! HP={player_data.hp}, AC={player_data.ac}, позиция=({player_data.x},{player_data.y})")
-    await websocket.send_text(get_map_state())
-    
+    await websocket.send_text(f"Добро пожаловать в кампанию {campaign_id}, {player_name}!")
     try:
         while True:
             data = await websocket.receive_text()
-            
-            # -------- КОМАНДА: БРОСОК КУБИКА --------
-            if data.startswith("/roll"):
-                parts = data.split()
-                if len(parts) >= 2:
-                    dice = parts[1]
-                    if 'd' in dice:
-                        count, sides = dice.split('d')
-                        count = int(count) if count else 1
-                        sides = int(sides)
-                        results = [random.randint(1, sides) for _ in range(count)]
-                        total = sum(results)
-                        await broadcast(f"🎲 {player_name} бросил {dice}: {results} = {total}")
-                    else:
-                        await websocket.send_text("❌ Неверный формат. Используй: /roll 2d6")
-            
-            # -------- КОМАНДА: ИЗМЕНИТЬ HP --------
-            elif data.startswith("/hp"):
-                parts = data.split()
-                if len(parts) == 2:
-                    new_hp = int(parts[1])
-                    p = game_state["players"][player_name]
-                    p["hp"] = max(0, min(p["max_hp"], new_hp))
-                    await broadcast(f"❤️ {player_name} изменил HP на {p['hp']}/{p['max_hp']}")
-                    save_player_to_db(player_name, p["hp"], p["ac"], p["level"], p["x"], p["y"])
-            
-            # -------- КОМАНДА: ДВИЖЕНИЕ --------
-            elif data.startswith("/move"):
-                parts = data.split()
-                if len(parts) == 3:
-                    try:
-                        new_x = int(parts[1])
-                        new_y = int(parts[2])
-                        size = game_state["map_size"]
-                        if 0 <= new_x < size and 0 <= new_y < size:
-                            p = game_state["players"][player_name]
-                            p["x"] = new_x
-                            p["y"] = new_y
-                            await broadcast(f"🚶 {player_name} переместился на ({new_x}, {new_y})")
-                            await broadcast(get_map_state())
-                            save_player_to_db(player_name, p["hp"], p["ac"], p["level"], new_x, new_y)
-                        else:
-                            await websocket.send_text(f"❌ Координаты должны быть от 0 до {size-1}")
-                    except ValueError:
-                        await websocket.send_text("❌ Используй: /move X Y (числа)")
-            
-            # -------- КОМАНДА: ПОКАЗАТЬ КАРТУ --------
-            elif data == "/map":
-                await websocket.send_text(get_map_state())
-            
-            # -------- КОМАНДА: СТАТУС --------
-            elif data == "/status":
-                p = game_state["players"][player_name]
-                await websocket.send_text(f"📊 {player_name}: HP={p['hp']}/{p['max_hp']}, AC={p['ac']}, Level={p['level']}, позиция=({p['x']},{p['y']})")
-            
-            # -------- КОМАНДА: ИНИЦИАТИВА --------
-            elif data.startswith("/init"):
-                parts = data.split()
-                if len(parts) >= 2:
-                    # /init +10 (добавить бонус к броску)
-                    bonus = int(parts[1]) if len(parts) == 2 else 0
-                    roll = random.randint(1, 20) + bonus
-                    # Добавляем игрока в инициативу (если ещё нет)
-                    if player_name not in game_state["initiative"]:
-                        game_state["initiative"].append(player_name)
-                    await broadcast(f"⚔️ {player_name} бросил инициативу: {roll} (бонус {bonus})")
-            
-            elif data == "/init_list":
-                # Показать очередь инициативы
-                init_list = game_state["initiative"]
-                if init_list:
-                    current = game_state["turn_index"] % len(init_list)
-                    msg = "📋 Инициатива:\n"
-                    for i, name in enumerate(init_list):
-                        marker = "👉 " if i == current else "   "
-                        msg += f"{marker}{i+1}. {name}\n"
-                    await websocket.send_text(msg)
-                else:
-                    await websocket.send_text("📋 Инициатива пуста. Используй /init +бонус")
-            
-            elif data == "/next":
-                # Передать ход следующему
-                if game_state["initiative"]:
-                    game_state["turn_index"] = (game_state["turn_index"] + 1) % len(game_state["initiative"])
-                    current = game_state["initiative"][game_state["turn_index"] % len(game_state["initiative"])]
-                    await broadcast(f"⏭️ Ход передан {current}!")
-                else:
-                    await websocket.send_text("📋 Сначала добавь игроков в инициативу через /init")
-            
-            # -------- КОМАНДА: ИГРОКИ ОНЛАЙН --------
-            elif data == "/players":
-                online = ", ".join(active_connections.keys())
-                await websocket.send_text(f"👥 Игроки онлайн: {online}")
-            
-            # -------- КОМАНДА: ПОМОЩЬ --------
-            elif data == "/help":
-                help_text = """📖 Доступные команды:
-/roll 2d6 - бросить кубики
-/hp 15 - установить HP
-/move X Y - переместиться на карте
-/map - показать карту
-/status - показать свой статус
-/init +бонус - бросить инициативу
-/init_list - показать очередь
-/next - передать ход
-/players - игроки онлайн
-/help - эта справка"""
-                await websocket.send_text(help_text)
-            
-            # -------- ОБЫЧНОЕ СООБЩЕНИЕ --------
-            else:
-                await broadcast(f"💬 {player_name}: {data}")
-                
+            await websocket.send_text(f"Эхо: {data}")
     except WebSocketDisconnect:
-        del active_connections[player_name]
-        if player_name in game_state["players"]:
-            del game_state["players"][player_name]
-        if player_name in game_state["initiative"]:
-            game_state["initiative"].remove(player_name)
-        await broadcast(f"Игрок {player_name} покинул стол.")
+        pass
