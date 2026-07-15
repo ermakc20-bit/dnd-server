@@ -1,0 +1,404 @@
+/* static/css/style_oprichniki.css - ОПРИЧНИКИ (Походный лагерь 1668) */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Old+Standard+TT&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Old Standard TT', serif;
+    color: #c4b8a8;
+    min-height: 100vh;
+    background: #0a0808;
+    background-image: 
+        radial-gradient(ellipse at center, rgba(10, 8, 8, 0.4) 0%, rgba(10, 8, 8, 0.85) 100%),
+        url('/static/images/campfire.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+
+/* Анимированный костёр (свечение) */
+body::before {
+    content: '';
+    position: fixed;
+    bottom: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(ellipse, rgba(255, 150, 50, 0.08) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    animation: fireGlow 3s ease-in-out infinite alternate;
+}
+
+@keyframes fireGlow {
+    0% { opacity: 0.4; transform: translateX(-50%) scale(0.9); }
+    100% { opacity: 0.9; transform: translateX(-50%) scale(1.2); }
+}
+
+/* Искры от костра */
+body::after {
+    content: '✦ • ✦ • ✦ • ✦';
+    position: fixed;
+    bottom: 30%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 18px;
+    color: rgba(255, 200, 100, 0.15);
+    letter-spacing: 40px;
+    pointer-events: none;
+    z-index: 0;
+    animation: sparksRise 5s ease-in-out infinite alternate;
+}
+
+@keyframes sparksRise {
+    0% { opacity: 0.2; transform: translateX(-50%) translateY(0) scale(0.8); }
+    100% { opacity: 0.8; transform: translateX(-50%) translateY(-40px) scale(1.2); }
+}
+
+/* Шелест травы */
+.rus-main::before {
+    content: '~ ~ ~ ~ ~';
+    position: fixed;
+    bottom: 10%;
+    left: 10%;
+    font-size: 30px;
+    color: rgba(100, 120, 80, 0.05);
+    letter-spacing: 20px;
+    pointer-events: none;
+    z-index: 0;
+    animation: grassSway 6s ease-in-out infinite alternate;
+}
+
+@keyframes grassSway {
+    0% { transform: translateX(-10px) rotate(-1deg); opacity: 0.3; }
+    100% { transform: translateX(10px) rotate(1deg); opacity: 0.7; }
+}
+
+/* Туман у земли */
+.rus-main .fog-overlay {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30%;
+    background: linear-gradient(0deg, rgba(10, 8, 8, 0.6) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+    animation: fogRise 10s ease-in-out infinite alternate;
+}
+
+@keyframes fogRise {
+    0% { opacity: 0.4; height: 20%; }
+    100% { opacity: 0.8; height: 40%; }
+}
+
+/* -------- ОСТАЛЬНЫЕ СТИЛИ (без изменений) -------- */
+.rus-header {
+    background: linear-gradient(180deg, rgba(10, 8, 8, 0.92) 0%, rgba(10, 8, 8, 0.6) 100%);
+    padding: 15px 30px;
+    border-bottom: 2px solid #8b3a2a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 10;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.9);
+}
+
+.rus-header .logo {
+    font-family: 'Cinzel', serif;
+    font-size: 24px;
+    color: #c4a050;
+    text-shadow: 0 0 30px rgba(196, 160, 80, 0.2);
+    letter-spacing: 6px;
+}
+
+.rus-header .logo span {
+    color: #8b3a2a;
+}
+
+.rus-header .user-info {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.rus-header .user-info .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #8b3a2a;
+    background: #1a100e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #c4a050;
+}
+
+.rus-header a {
+    color: #5a4a3a;
+    text-decoration: none;
+    transition: color 0.3s;
+}
+
+.rus-header a:hover {
+    color: #c4a050;
+}
+
+.rus-main {
+    display: flex;
+    gap: 30px;
+    padding: 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+    min-height: calc(100vh - 100px);
+}
+
+.rus-panel {
+    width: 220px;
+    min-width: 180px;
+    background: rgba(10, 8, 8, 0.88);
+    border: 1px solid #2a1a10;
+    border-radius: 12px;
+    padding: 20px 15px;
+    height: fit-content;
+    backdrop-filter: blur(5px);
+}
+
+.rus-panel .panel-title {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c4a050;
+    text-align: center;
+    border-bottom: 1px solid #2a1a10;
+    padding-bottom: 12px;
+    margin-bottom: 15px;
+    letter-spacing: 3px;
+}
+
+.rus-panel .company-item {
+    padding: 12px 15px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    border-left: 3px solid transparent;
+    background: rgba(20, 12, 8, 0.5);
+}
+
+.rus-panel .company-item:hover {
+    background: rgba(196, 160, 80, 0.1);
+    border-left-color: #c4a050;
+}
+
+.rus-panel .company-item.active {
+    background: rgba(196, 160, 80, 0.15);
+    border-left-color: #c4a050;
+}
+
+.rus-panel .company-item .name {
+    font-size: 14px;
+    color: #c4b8a8;
+}
+
+.rus-panel .company-item .role {
+    font-size: 11px;
+    color: #5a4a3a;
+}
+
+.rus-panel .company-item .role.gm {
+    color: #c4a050;
+}
+
+.rus-grid {
+    flex: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    align-content: start;
+}
+
+.rus-card {
+    background: rgba(10, 8, 8, 0.88);
+    border: 1px solid #2a1a10;
+    border-radius: 12px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.4s ease;
+    text-align: center;
+    backdrop-filter: blur(5px);
+    position: relative;
+    overflow: hidden;
+}
+
+.rus-card::before {
+    content: 'ᚱ';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    font-size: 60px;
+    color: rgba(139, 58, 42, 0.06);
+    pointer-events: none;
+    font-family: 'Cinzel', serif;
+}
+
+.rus-card:hover {
+    transform: translateY(-5px);
+    border-color: #c4a050;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+}
+
+.rus-card.selected {
+    border-color: #c4a050;
+    box-shadow: 0 0 30px rgba(196, 160, 80, 0.15);
+}
+
+.rus-card .avatar-container {
+    width: 100px;
+    height: 100px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    border: 2px solid #2a1a10;
+    overflow: hidden;
+    background: #0a0808;
+}
+
+.rus-card .avatar-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.rus-card .name {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c4a050;
+}
+
+.rus-card .race-class {
+    font-size: 12px;
+    color: #7a6a5a;
+}
+
+.rus-card .level {
+    font-size: 12px;
+    color: #5a3a2a;
+    background: rgba(90, 58, 42, 0.3);
+    padding: 2px 12px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-top: 5px;
+}
+
+.rus-stats {
+    width: 280px;
+    min-width: 240px;
+    background: rgba(10, 8, 8, 0.88);
+    border: 1px solid #2a1a10;
+    border-radius: 12px;
+    padding: 20px;
+    backdrop-filter: blur(5px);
+    height: fit-content;
+}
+
+.rus-stats .panel-title {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c4a050;
+    text-align: center;
+    border-bottom: 1px solid #2a1a10;
+    padding-bottom: 12px;
+    margin-bottom: 15px;
+    letter-spacing: 3px;
+}
+
+.rus-stats .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(42, 26, 16, 0.4);
+    font-size: 14px;
+}
+
+.rus-stats .stat-row .label {
+    color: #7a6a5a;
+}
+
+.rus-stats .stat-row .value {
+    color: #c4b8a8;
+    font-weight: bold;
+}
+
+.rus-stats .stat-row .value.highlight {
+    color: #c4a050;
+}
+
+.btn-rus-enter {
+    width: 100%;
+    padding: 14px;
+    margin-top: 20px;
+    background: linear-gradient(135deg, #2a1a10, #1a100e);
+    border: 1px solid #c4a050;
+    border-radius: 8px;
+    color: #c4b8a8;
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    letter-spacing: 3px;
+}
+
+.btn-rus-enter:hover {
+    background: linear-gradient(135deg, #3a2a1a, #2a1a10);
+    box-shadow: 0 0 30px rgba(196, 160, 80, 0.15);
+    border-color: #c4a050;
+}
+
+.rus-footer {
+    background: rgba(10, 8, 8, 0.92);
+    border-top: 1px solid #2a1a10;
+    padding: 12px 30px;
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    z-index: 10;
+}
+
+.rus-footer a {
+    color: #4a3a2a;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    transition: color 0.3s;
+}
+
+.rus-footer a:hover {
+    color: #c4a050;
+}
+
+@media (max-width: 900px) {
+    .rus-main {
+        flex-direction: column;
+    }
+    .rus-panel, .rus-stats {
+        width: 100%;
+        min-width: unset;
+    }
+    .rus-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+}

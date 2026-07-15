@@ -1,4 +1,4 @@
-/* static/css/style.css - Викторианский Лондон */
+/* static/css/style.css - ВИКТОРИАНСКИЙ ЛОНДОН (Улица 1888) */
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Georgia&display=swap');
 
 * {
@@ -9,18 +9,18 @@
 
 body {
     font-family: 'Georgia', serif;
-    background: #0a0605;
     color: #d4c5a9;
     min-height: 100vh;
+    background: #0a0808;
     background-image: 
-        radial-gradient(ellipse at center, rgba(26, 15, 10, 0.7) 0%, rgba(10, 6, 5, 0.9) 100%),
-        url('https://images.unsplash.com/photo-1544058634-5a1b7b1c64c2?w=1200&auto=format');
+        radial-gradient(ellipse at center, rgba(20, 15, 12, 0.5) 0%, rgba(10, 8, 8, 0.85) 100%),
+        url('/static/images/london_street.jpg');
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
 }
 
-/* Декоративный оверлей (туман) */
+/* Декоративный туман */
 body::before {
     content: '';
     position: fixed;
@@ -29,15 +29,55 @@ body::before {
     right: 0;
     bottom: 0;
     background: 
-        radial-gradient(ellipse at 20% 50%, rgba(100,80,60,0.15) 0%, transparent 60%),
-        radial-gradient(ellipse at 80% 50%, rgba(100,80,60,0.1) 0%, transparent 50%);
+        radial-gradient(ellipse at 20% 80%, rgba(180, 170, 150, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(160, 150, 130, 0.1) 0%, transparent 40%);
     pointer-events: none;
     z-index: 0;
+    animation: fogMove 14s ease-in-out infinite alternate;
 }
 
-/* Хедер */
+@keyframes fogMove {
+    0% { opacity: 0.4; transform: translateX(-15px) scale(1); }
+    100% { opacity: 0.8; transform: translateX(15px) scale(1.02); }
+}
+
+/* Мерцание газового фонаря */
+.victorian-main::before {
+    content: '';
+    position: fixed;
+    top: 15%;
+    left: 20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(ellipse, rgba(255, 200, 100, 0.08) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    animation: lampGlow 4s ease-in-out infinite alternate;
+}
+
+.victorian-main::after {
+    content: '';
+    position: fixed;
+    bottom: 25%;
+    right: 15%;
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(ellipse, rgba(255, 200, 100, 0.06) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    animation: lampGlow 5s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes lampGlow {
+    0% { opacity: 0.3; transform: scale(1); }
+    100% { opacity: 0.9; transform: scale(1.4); }
+}
+
+/* -------- ОСТАЛЬНЫЕ СТИЛИ (без изменений) -------- */
 .victorian-header {
-    background: linear-gradient(180deg, rgba(26, 15, 10, 0.95) 0%, rgba(26, 15, 10, 0.7) 100%);
+    background: linear-gradient(180deg, rgba(10, 8, 8, 0.92) 0%, rgba(10, 8, 8, 0.6) 100%);
     padding: 15px 30px;
     border-bottom: 2px solid #6b4c3b;
     display: flex;
@@ -76,6 +116,7 @@ body::before {
     align-items: center;
     justify-content: center;
     font-size: 18px;
+    color: #c9a87c;
 }
 
 .victorian-header a {
@@ -88,7 +129,6 @@ body::before {
     color: #f0d5a0;
 }
 
-/* Основной контейнер */
 .victorian-main {
     display: flex;
     gap: 30px;
@@ -100,11 +140,10 @@ body::before {
     min-height: calc(100vh - 100px);
 }
 
-/* Левая колонка - Компании */
 .companies-panel {
     width: 220px;
     min-width: 180px;
-    background: rgba(26, 15, 10, 0.85);
+    background: rgba(10, 8, 8, 0.85);
     border: 1px solid #4a3528;
     border-radius: 12px;
     padding: 20px 15px;
@@ -157,7 +196,6 @@ body::before {
     color: #c9a87c;
 }
 
-/* Центральная колонка - Карточки персонажей */
 .characters-grid {
     flex: 2;
     display: grid;
@@ -166,9 +204,8 @@ body::before {
     align-content: start;
 }
 
-/* Карточка персонажа (викторианский стиль) */
 .character-card {
-    background: rgba(26, 15, 10, 0.85);
+    background: rgba(10, 8, 8, 0.85);
     border: 1px solid #4a3528;
     border-radius: 12px;
     padding: 15px;
@@ -178,17 +215,6 @@ body::before {
     backdrop-filter: blur(5px);
     position: relative;
     overflow: hidden;
-}
-
-.character-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(201, 168, 124, 0.05), transparent);
-    pointer-events: none;
 }
 
 .character-card:hover {
@@ -210,7 +236,6 @@ body::before {
     border: 2px solid #4a3528;
     overflow: hidden;
     background: #1a0f0a;
-    position: relative;
 }
 
 .character-card .avatar-container img {
@@ -240,11 +265,10 @@ body::before {
     margin-top: 5px;
 }
 
-/* Правая колонка - Характеристики */
 .stats-panel {
     width: 280px;
     min-width: 240px;
-    background: rgba(26, 15, 10, 0.85);
+    background: rgba(10, 8, 8, 0.85);
     border: 1px solid #4a3528;
     border-radius: 12px;
     padding: 20px;
@@ -284,7 +308,6 @@ body::before {
     color: #c9a87c;
 }
 
-/* Кнопка "Войти в игру" */
 .btn-enter {
     width: 100%;
     padding: 14px;
@@ -305,9 +328,8 @@ body::before {
     box-shadow: 0 0 30px rgba(201, 168, 124, 0.2);
 }
 
-/* Нижнее меню */
 .victorian-footer {
-    background: rgba(26, 15, 10, 0.9);
+    background: rgba(10, 8, 8, 0.9);
     border-top: 1px solid #4a3528;
     padding: 12px 30px;
     display: flex;
@@ -333,7 +355,6 @@ body::before {
     color: #c9a87c;
 }
 
-/* Адаптация для мобильных */
 @media (max-width: 900px) {
     .victorian-main {
         flex-direction: column;
