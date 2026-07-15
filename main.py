@@ -47,8 +47,71 @@ class Player(Base):
     y = Column(Integer, default=0)
     user = relationship("User")
     campaign = relationship("Campaign")
+class Settings(Base):
+    __tablename__ = 'settings'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+    description = Column(String)
+    theme = Column(String)
+    background_image = Column(String)
+    created_at = Column(DateTime, default=datetime.datetime.now)
 
+class Template(Base):
+    __tablename__ = 'templates'
+    id = Column(Integer, primary_key=True)
+    setting_id = Column(Integer, ForeignKey('settings.id'))
+    name = Column(String)
+    type = Column(String)  # 'player', 'npc', 'enemy'
+    race = Column(String)
+    class_name = Column(String)  # 'class' зарезервировано
+    level = Column(Integer)
+    avatar_url = Column(String)
+    stats_json = Column(String)  # JSON
+    abilities_json = Column(String)  # JSON
+    equipment_json = Column(String)  # JSON
+    setting = relationship("Settings")
 Base.metadata.create_all(engine)
+# -------- ДОБАВЛЕНИЕ БИБЛИОТЕК В БД --------
+def init_libraries():
+    """Инициализирует библиотеки сеттингов и шаблонов"""
+    session = Session()
+    
+    # Проверяем, есть ли уже библиотеки
+    if session.query(Settings).first():
+        session.close()
+        return
+    
+    # Создаём сеттинги
+    settings_data = [
+        {
+            "name": "Викторианский Лондон",
+            "theme": "victorian_vampire",
+            "description": "Туманный Лондон 1888 года. Город погружён во тьму, по улицам бродят вампиры, а в подземельях скрываются древние тайны. Вы — охотники на нечисть или сами её часть?",
+            "background_image": "https://images.unsplash.com/photo-1544058634-5a1b7b1c64c2?w=1200&auto=format"
+        },
+        {
+            "name": "Опричники: Тени Прошлого",
+            "theme": "oprichniki_witcher",
+            "description": "Русь, наполненная магией и древними существами. Опричники — элитные охотники на нечисть, служащие царю. Но их настоящая битва — против сил, угрожающих самому существованию мира.",
+            "background_image": "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1200&auto=format"
+        }
+    ]
+    
+    for data in settings_data:
+        setting = Settings(
+            name=data["name"],
+            theme=data["theme"],
+            description=data["description"],
+            background_image=data["background_image"]
+        )
+        session.add(setting)
+    
+    session.commit()
+    session.close()
+    print("✅ Библиотеки сеттингов и шаблонов инициализированы!")
+
+# Вызываем при старте
+init_libraries()
 
 # -------- НАСТРОЙКА СЕРВЕРА --------
 app = FastAPI()
