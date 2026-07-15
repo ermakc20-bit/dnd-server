@@ -59,6 +59,12 @@ def get_user_by_username(username):
     session.close()
     return user
 
+def get_user_by_id(user_id):
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    session.close()
+    return user
+
 def create_user(username, password, role='player'):
     session = Session()
     user = User(username=username, password_hash=hash_password(password), role=role)
@@ -81,7 +87,7 @@ def create_campaign(name, gm_id, description=''):
     session.close()
     return campaign
 
-# -------- СТРАНИЦЫ (HTML как строки) --------
+# -------- СТРАНИЦЫ --------
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return RedirectResponse(url="/login")
@@ -100,7 +106,6 @@ async def register_page():
             input, select, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 14px; }
             input, select { background: #3a3a4e; color: #fff; }
             button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
-            .error { color: #ff6b6b; }
             a { color: #c7a252; text-decoration: none; }
         </style>
     </head>
@@ -146,7 +151,6 @@ async def login_page():
             input, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 14px; }
             input { background: #3a3a4e; color: #fff; }
             button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
-            .error { color: #ff6b6b; }
             a { color: #c7a252; text-decoration: none; }
         </style>
     </head>
@@ -190,7 +194,6 @@ async def dashboard(user_id: int):
             button { background: #c7a252; color: #1a1a2e; font-weight: bold; cursor: pointer; }
             .campaign { background: #3a3a4e; padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
             .campaign a { color: #c7a252; text-decoration: none; font-weight: bold; }
-            .flex { display: flex; gap: 10px; align-items: center; }
         </style>
     </head>
     <body>
@@ -198,9 +201,9 @@ async def dashboard(user_id: int):
         <div class="card">
             <h3>Создать новую кампанию</h3>
             <form method="post" action="/create_campaign">
-                <input type="hidden" name="gm_id" value=""" + str(user_id) + """>
+                <input type="hidden" name="gm_id" value=\"""" + str(user_id) + """\">
                 <input type="text" name="name" placeholder="Название кампании" required>
-                <textarea name="description" placeholder="Описание (необязательно)"></textarea>
+                <textarea name="description" placeholder="Описание"></textarea>
                 <button type="submit">Создать</button>
             </form>
         </div>
@@ -211,18 +214,12 @@ async def dashboard(user_id: int):
         for c in campaigns:
             html += f"""
                 <div class="campaign">
-                    <div>
-                        <strong>{c.name}</strong>
-                        <div style="font-size: 12px; color: #aaa;">{c.description}</div>
-                    </div>
-                    <div class="flex">
-                        <a href="/game/{c.id}">Войти</a>
-                    </div>
+                    <div><strong>{c.name}</strong> - {c.description}</div>
+                    <a href="/game/{c.id}">Войти</a>
                 </div>
             """
     else:
-        html += '<p style="color: #aaa;">У вас пока нет кампаний. Создайте первую!</p>'
-    
+        html += '<p>Нет кампаний</p>'
     html += """
         </div>
         <div style="margin-top: 20px;">
@@ -238,7 +235,229 @@ async def create_campaign_endpoint(name: str = Form(...), gm_id: int = Form(...)
     campaign = create_campaign(name, gm_id, description)
     return RedirectResponse(url=f"/dashboard/{gm_id}", status_code=303)
 
-# -------- ИГРОВОЙ ВЕБСОКЕТ (ДЛЯ ТЕСТА) --------
+# -------- НОВОЕ: ГЛАВНОЕ МЕНЮ ДЛЯ GM --------
+@app.get("/gm_dashboard/{user_id}", response_class=HTMLResponse)
+async def gm_dashboard(user_id: int):
+    user = get_user_by_id(user_id)
+    if not user:
+        return HTMLResponse(content="<h2>Пользователь не найден</h2><a href='/login'>Войти</a>", status_code=404)
+    
+    campaigns = get_campaigns_for_user(user_id)
+    games_count = len(campaigns)
+    game_icons = ["fa-dice-d20", "fa-dragon", "fa-hat-wizard", "fa-skull", "fa-scroll"]
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>GM Панель</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ 
+                background: #1a1a2e; 
+                color: #eee; 
+                font-family: 'Segoe UI', Arial, sans-serif;
+                min-height: 100vh;
+                padding-bottom: 70px;
+            }}
+            .header {{
+                background: #2a2a3e;
+                padding: 15px 25px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 2px solid #c7a252;
+            }}
+            .user-info {{
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }}
+            .avatar {{
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                background: #3a3a4e;
+                border: 2px solid #c7a252;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 24px;
+                color: #c7a252;
+            }}
+            .username {{
+                font-weight: bold;
+                font-size: 18px;
+            }}
+            .role-badge {{
+                background: #c7a252;
+                color: #1a1a2e;
+                padding: 4px 14px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            .stats {{
+                display: flex;
+                gap: 30px;
+                padding: 15px 25px;
+                background: #16162a;
+                border-bottom: 1px solid #2a2a3e;
+            }}
+            .stat-item {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                color: #aaa;
+                font-size: 14px;
+            }}
+            .stat-value {{
+                color: #fff;
+                font-weight: bold;
+            }}
+            .games-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                gap: 20px;
+                padding: 25px;
+            }}
+            .game-card {{
+                background: #2a2a3e;
+                border-radius: 16px;
+                padding: 25px 15px;
+                text-align: center;
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.2s;
+                border: 1px solid #3a3a4e;
+            }}
+            .game-card:hover {{
+                transform: translateY(-5px);
+                box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+                border-color: #c7a252;
+            }}
+            .game-icon {{
+                font-size: 40px;
+                color: #c7a252;
+                margin-bottom: 10px;
+            }}
+            .game-name {{
+                font-weight: bold;
+                font-size: 14px;
+                margin-bottom: 5px;
+            }}
+            .game-status {{
+                font-size: 12px;
+                color: #888;
+            }}
+            .create-card {{
+                border: 2px dashed #3a3a4e;
+                background: transparent;
+            }}
+            .create-card:hover {{
+                border-color: #c7a252;
+                background: #1e1e32;
+            }}
+            .footer-menu {{
+                background: #2a2a3e;
+                padding: 12px 25px;
+                display: flex;
+                justify-content: space-around;
+                border-top: 1px solid #3a3a4e;
+                position: fixed;
+                bottom: 0;
+                width: 100%;
+            }}
+            .footer-menu a {{
+                color: #888;
+                text-decoration: none;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 14px;
+                transition: color 0.2s;
+            }}
+            .footer-menu a:hover {{
+                color: #c7a252;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="user-info">
+                <div class="avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <span class="username">{user.username}</span>
+                <span class="role-badge"><i class="fas fa-crown"></i> GM</span>
+            </div>
+            <div>
+                <a href="#" style="color: #aaa;">
+                    <i class="fas fa-cog fa-lg"></i>
+                </a>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <i class="fas fa-gamepad"></i>
+                <span>Игр: <span class="stat-value">{games_count}</span></span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-users"></i>
+                <span>Игроков: <span class="stat-value">0</span></span>
+            </div>
+            <div class="stat-item">
+                <i class="fas fa-hdd"></i>
+                <span>Свободно: <span class="stat-value">2.4 ГБ</span></span>
+            </div>
+        </div>
+
+        <div class="games-grid">
+            <div class="game-card create-card" onclick="alert('Форма создания игры будет здесь!')">
+                <div class="game-icon">
+                    <i class="fas fa-plus-circle"></i>
+                </div>
+                <div class="game-name">Создать игру</div>
+                <div class="game-status">Новая кампания</div>
+            </div>
+    """
+    
+    for i, campaign in enumerate(campaigns):
+        icon = game_icons[i % len(game_icons)]
+        html_content += f"""
+            <div class="game-card" onclick="alert('Переход в игру: {campaign.name}')">
+                <div class="game-icon">
+                    <i class="fas {icon}"></i>
+                </div>
+                <div class="game-name">{campaign.name}</div>
+                <div class="game-status">0/6 игроков</div>
+            </div>
+        """
+    
+    html_content += """
+        </div>
+        <div class="footer-menu">
+            <a href="#">
+                <i class="fas fa-home"></i> Главная
+            </a>
+            <a href="#">
+                <i class="fas fa-users"></i> Персонажи
+            </a>
+            <a href="#">
+                <i class="fas fa-chart-bar"></i> Статистика
+            </a>
+            <a href="/login" style="color: #ff6b6b;">
+                <i class="fas fa-sign-out-alt"></i> Выйти
+            </a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+# -------- ИГРОВОЙ ВЕБСОКЕТ --------
 @app.websocket("/ws/{campaign_id}/{player_name}")
 async def game_websocket(websocket: WebSocket, campaign_id: int, player_name: str):
     await websocket.accept()
