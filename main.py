@@ -1,11 +1,14 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
 import random
 import hashlib
+import json
 
 # -------- НАСТРОЙКА БАЗЫ ДАННЫХ --------
 Base = declarative_base()
@@ -49,6 +52,7 @@ Base.metadata.create_all(engine)
 
 # -------- НАСТРОЙКА СЕРВЕРА --------
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -235,7 +239,7 @@ async def create_campaign_endpoint(name: str = Form(...), gm_id: int = Form(...)
     campaign = create_campaign(name, gm_id, description)
     return RedirectResponse(url=f"/dashboard/{gm_id}", status_code=303)
 
-# -------- НОВОЕ: ГЛАВНОЕ МЕНЮ ДЛЯ GM --------
+# -------- ГЛАВНОЕ МЕНЮ ДЛЯ GM --------
 @app.get("/gm_dashboard/{user_id}", response_class=HTMLResponse)
 async def gm_dashboard(user_id: int):
     user = get_user_by_id(user_id)
@@ -452,6 +456,156 @@ async def gm_dashboard(user_id: int):
                 <i class="fas fa-sign-out-alt"></i> Выйти
             </a>
         </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+# -------- СТРАНИЦА ИГРОКА (ВИКТОРИАНСКИЙ СТИЛЬ) --------
+@app.get("/player_dashboard/{user_id}", response_class=HTMLResponse)
+async def player_dashboard(user_id: int):
+    user = get_user_by_id(user_id)
+    if not user:
+        return HTMLResponse(content="<h2>Пользователь не найден</h2><a href='/login'>Войти</a>", status_code=404)
+    
+    campaigns = get_campaigns_for_user(user_id)
+    
+    # Тестовые персонажи (позже — из БД)
+    test_characters = [
+        {
+            "id": 1,
+            "name": "Граф Дракула",
+            "race": "Вампир",
+            "class": "Волшебник",
+            "level": 5,
+            "avatar": "https://i.pinimg.com/564x/7b/6d/a1/7b6da1d9ab1a8e3c8a7f3d0b8a8e7e0a.jpg",
+            "stats": {"Сила": 12, "Ловкость": 16, "Телос": 10, "Интеллект": 14, "Мудрость": 8, "Харизма": 18}
+        },
+        {
+            "id": 2,
+            "name": "Эльфийка теней",
+            "race": "Полуэльф",
+            "class": "Разбойник",
+            "level": 3,
+            "avatar": "https://i.pinimg.com/564x/2c/5e/7f/2c5e7f8b9c0d6e5f4b8a9c7d6e5f4b8a.jpg",
+            "stats": {"Сила": 8, "Ловкость": 18, "Телос": 12, "Интеллект": 14, "Мудрость": 12, "Харизма": 10}
+        },
+        {
+            "id": 3,
+            "name": "Маг Арканум",
+            "race": "Человек",
+            "class": "Чародей",
+            "level": 4,
+            "avatar": "https://i.pinimg.com/564x/3f/8c/7d/3f8c7d8e9f0a1b2c3d4e5f6a7b8c9d0e.jpg",
+            "stats": {"Сила": 10, "Ловкость": 14, "Телос": 12, "Интеллект": 16, "Мудрость": 10, "Харизма": 16}
+        }
+    ]
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Выбор персонажа - D&D</title>
+        <link rel="stylesheet" href="/static/css/style.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    </head>
+    <body>
+        <header class="victorian-header">
+            <div class="logo">D&D <span>•</span> VICTORIAN</div>
+            <div class="user-info">
+                <div class="avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <span>{user.username}</span>
+                <a href="/login" style="color: #6b4c3b; font-size: 14px;">
+                    <i class="fas fa-sign-out-alt"></i>
+                </a>
+            </div>
+        </header>
+
+        <div class="victorian-main">
+            <div class="companies-panel">
+                <div class="panel-title">КОМПАНИИ</div>
+    """
+    
+    for campaign in campaigns:
+        role = "GM" if campaign.gm_id == user_id else "Player"
+        html_content += f"""
+                <div class="company-item">
+                    <div class="name">{campaign.name}</div>
+                    <div class="role {role.lower()}">{role}</div>
+                </div>
+        """
+    
+    html_content += """
+            </div>
+
+            <div class="characters-grid" id="charactersGrid">
+    """
+    
+    for char in test_characters:
+        html_content += f"""
+                <div class="character-card" onclick="selectCharacter({char['id']})" data-id="{char['id']}">
+                    <div class="avatar-container">
+                        <img src="{char['avatar']}" alt="{char['name']}">
+                    </div>
+                    <div class="name">{char['name']}</div>
+                    <div class="race-class">{char['race']} · {char['class']}</div>
+                    <div class="level">Lv.{char['level']}</div>
+                </div>
+        """
+    
+    html_content += """
+            </div>
+
+            <div class="stats-panel" id="statsPanel">
+                <div class="panel-title">ХАРАКТЕРИСТИКИ</div>
+                <div id="statsContent">
+                    <p style="color: #6b4c3b; text-align: center; font-size: 14px;">
+                        <i class="fas fa-hand-pointer"></i> Выберите персонажа
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="victorian-footer">
+            <a href="#"><i class="fas fa-comment"></i> Чат</a>
+            <a href="#"><i class="fas fa-map"></i> Карта</a>
+            <a href="#"><i class="fas fa-backpack"></i> Инвентарь</a>
+            <a href="#"><i class="fas fa-hat-wizard"></i> Заклинания</a>
+            <a href="/gm_dashboard/1"><i class="fas fa-crown"></i> GM</a>
+        </div>
+
+        <script>
+            const characters = """ + json.dumps(test_characters) + """;
+            
+            function selectCharacter(id) {
+                document.querySelectorAll('.character-card').forEach(el => el.classList.remove('selected'));
+                const card = document.querySelector(`.character-card[data-id="${{id}}"]`);
+                if (card) card.classList.add('selected');
+                
+                const char = characters.find(c => c.id === id);
+                if (!char) return;
+                
+                const statsContent = document.getElementById('statsContent');
+                let statsHTML = '';
+                for (const [key, value] of Object.entries(char.stats)) {
+                    statsHTML += `<div class="stat-row">
+                        <span class="label">${key}</span>
+                        <span class="value highlight">${value}</span>
+                    </div>`;
+                }
+                statsHTML += `<button class="btn-enter" onclick="enterGame(${char.id})">
+                    <i class="fas fa-dice-d20"></i> Войти в игру
+                </button>`;
+                statsContent.innerHTML = statsHTML;
+            }
+            
+            function enterGame(charId) {
+                alert(`Вход в игру с персонажем ID: ${charId}`);
+            }
+        </script>
     </body>
     </html>
     """

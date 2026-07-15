@@ -1,0 +1,348 @@
+/* static/css/style.css - Викторианский Лондон */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Georgia&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Georgia', serif;
+    background: #0a0605;
+    color: #d4c5a9;
+    min-height: 100vh;
+    background-image: 
+        radial-gradient(ellipse at center, rgba(26, 15, 10, 0.7) 0%, rgba(10, 6, 5, 0.9) 100%),
+        url('https://images.unsplash.com/photo-1544058634-5a1b7b1c64c2?w=1200&auto=format');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+
+/* Декоративный оверлей (туман) */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+        radial-gradient(ellipse at 20% 50%, rgba(100,80,60,0.15) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 50%, rgba(100,80,60,0.1) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Хедер */
+.victorian-header {
+    background: linear-gradient(180deg, rgba(26, 15, 10, 0.95) 0%, rgba(26, 15, 10, 0.7) 100%);
+    padding: 15px 30px;
+    border-bottom: 2px solid #6b4c3b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 10;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+}
+
+.victorian-header .logo {
+    font-family: 'Cinzel', serif;
+    font-size: 24px;
+    color: #c9a87c;
+    text-shadow: 0 0 20px rgba(201, 168, 124, 0.3);
+    letter-spacing: 4px;
+}
+
+.victorian-header .logo span {
+    color: #8b0000;
+}
+
+.victorian-header .user-info {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.victorian-header .user-info .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #c9a87c;
+    background: #2d1b12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.victorian-header a {
+    color: #c9a87c;
+    text-decoration: none;
+    transition: color 0.3s;
+}
+
+.victorian-header a:hover {
+    color: #f0d5a0;
+}
+
+/* Основной контейнер */
+.victorian-main {
+    display: flex;
+    gap: 30px;
+    padding: 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+    min-height: calc(100vh - 100px);
+}
+
+/* Левая колонка - Компании */
+.companies-panel {
+    width: 220px;
+    min-width: 180px;
+    background: rgba(26, 15, 10, 0.85);
+    border: 1px solid #4a3528;
+    border-radius: 12px;
+    padding: 20px 15px;
+    height: fit-content;
+    backdrop-filter: blur(5px);
+}
+
+.companies-panel .panel-title {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c9a87c;
+    text-align: center;
+    border-bottom: 1px solid #4a3528;
+    padding-bottom: 12px;
+    margin-bottom: 15px;
+    letter-spacing: 2px;
+}
+
+.companies-panel .company-item {
+    padding: 12px 15px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    border-left: 3px solid transparent;
+    background: rgba(45, 27, 18, 0.5);
+}
+
+.companies-panel .company-item:hover {
+    background: rgba(201, 168, 124, 0.15);
+    border-left-color: #c9a87c;
+}
+
+.companies-panel .company-item.active {
+    background: rgba(201, 168, 124, 0.2);
+    border-left-color: #c9a87c;
+}
+
+.companies-panel .company-item .name {
+    font-size: 14px;
+    color: #d4c5a9;
+}
+
+.companies-panel .company-item .role {
+    font-size: 11px;
+    color: #6b4c3b;
+}
+
+.companies-panel .company-item .role.gm {
+    color: #c9a87c;
+}
+
+/* Центральная колонка - Карточки персонажей */
+.characters-grid {
+    flex: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    align-content: start;
+}
+
+/* Карточка персонажа (викторианский стиль) */
+.character-card {
+    background: rgba(26, 15, 10, 0.85);
+    border: 1px solid #4a3528;
+    border-radius: 12px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.4s ease;
+    text-align: center;
+    backdrop-filter: blur(5px);
+    position: relative;
+    overflow: hidden;
+}
+
+.character-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(201, 168, 124, 0.05), transparent);
+    pointer-events: none;
+}
+
+.character-card:hover {
+    transform: translateY(-5px);
+    border-color: #c9a87c;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+}
+
+.character-card.selected {
+    border-color: #c9a87c;
+    box-shadow: 0 0 30px rgba(201, 168, 124, 0.2);
+}
+
+.character-card .avatar-container {
+    width: 100px;
+    height: 100px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    border: 2px solid #4a3528;
+    overflow: hidden;
+    background: #1a0f0a;
+    position: relative;
+}
+
+.character-card .avatar-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.character-card .name {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c9a87c;
+}
+
+.character-card .race-class {
+    font-size: 12px;
+    color: #8a7a6a;
+}
+
+.character-card .level {
+    font-size: 12px;
+    color: #6b4c3b;
+    background: rgba(107, 76, 59, 0.3);
+    padding: 2px 12px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-top: 5px;
+}
+
+/* Правая колонка - Характеристики */
+.stats-panel {
+    width: 280px;
+    min-width: 240px;
+    background: rgba(26, 15, 10, 0.85);
+    border: 1px solid #4a3528;
+    border-radius: 12px;
+    padding: 20px;
+    backdrop-filter: blur(5px);
+    height: fit-content;
+}
+
+.stats-panel .panel-title {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #c9a87c;
+    text-align: center;
+    border-bottom: 1px solid #4a3528;
+    padding-bottom: 12px;
+    margin-bottom: 15px;
+    letter-spacing: 2px;
+}
+
+.stats-panel .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(74, 53, 40, 0.3);
+    font-size: 14px;
+}
+
+.stats-panel .stat-row .label {
+    color: #8a7a6a;
+}
+
+.stats-panel .stat-row .value {
+    color: #d4c5a9;
+    font-weight: bold;
+}
+
+.stats-panel .stat-row .value.highlight {
+    color: #c9a87c;
+}
+
+/* Кнопка "Войти в игру" */
+.btn-enter {
+    width: 100%;
+    padding: 14px;
+    margin-top: 20px;
+    background: linear-gradient(135deg, #6b4c3b, #4a3528);
+    border: 1px solid #c9a87c;
+    border-radius: 8px;
+    color: #d4c5a9;
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    letter-spacing: 2px;
+}
+
+.btn-enter:hover {
+    background: linear-gradient(135deg, #8a6a5a, #6b4c3b);
+    box-shadow: 0 0 30px rgba(201, 168, 124, 0.2);
+}
+
+/* Нижнее меню */
+.victorian-footer {
+    background: rgba(26, 15, 10, 0.9);
+    border-top: 1px solid #4a3528;
+    padding: 12px 30px;
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    z-index: 10;
+}
+
+.victorian-footer a {
+    color: #6b4c3b;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    transition: color 0.3s;
+}
+
+.victorian-footer a:hover {
+    color: #c9a87c;
+}
+
+/* Адаптация для мобильных */
+@media (max-width: 900px) {
+    .victorian-main {
+        flex-direction: column;
+    }
+    .companies-panel, .stats-panel {
+        width: 100%;
+        min-width: unset;
+    }
+    .characters-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+}
