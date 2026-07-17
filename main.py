@@ -48,6 +48,11 @@ class DiceVisibility(str, Enum):
     PUBLIC = "public"
     SECRET = "secret"
 
+class DiceMode(str, Enum):
+    FAST = "fast"
+    STANDARD = "standard"
+    CINEMATIC = "cinematic"
+
 class DiceEventType(str, Enum):
     ROLL_STARTED = "roll_started"
     ANIMATION_STARTED = "animation_started"
@@ -55,13 +60,6 @@ class DiceEventType(str, Enum):
     ROLL_COMPLETED = "roll_completed"
     CRITICAL_SUCCESS = "critical_success"
     CRITICAL_FAILURE = "critical_failure"
-
-class RollModifierType(str, Enum):
-    ADVANTAGE = "advantage"
-    DISADVANTAGE = "disadvantage"
-    BONUS = "bonus"
-    PENALTY = "penalty"
-    CUSTOM = "custom"
 
 # ============================================================
 # 2. БАЗА ДАННЫХ
@@ -130,10 +128,7 @@ class DiceHistory(Base):
     visibility = Column(String(20), default='public')
     reason = Column(String(200), default='')
     timestamp = Column(DateTime, default=datetime.now)
-    advantage_used = Column(Boolean, default=False)
-    disadvantage_used = Column(Boolean, default=False)
-    user = relationship("User", foreign_keys=[user_id])
-    character = relationship("Character", foreign_keys=[character_id])
+    dice_mode = Column(String(20), default='standard')
 
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
@@ -153,6 +148,7 @@ class GameRoom(Base):
     current_player_id = Column(Integer, nullable=True)
     initiative_order = Column(JSON, default='[]')
     combat_data = Column(JSON, default='{}')
+    dice_mode = Column(String(20), default='standard')
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
@@ -208,13 +204,258 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. DICE ENGINE (ФИНАЛЬНАЯ ВЕРСИЯ)
+# 3. CINEMATIC DICE SYSTEM (СИСТЕМА КИНОШНЫХ КУБИКОВ)
+# ============================================================
+
+@dataclass
+class DiceAnimationConfig:
+    """Конфигурация анимации кубиков."""
+    mode: DiceMode = DiceMode.STANDARD
+    duration: float = 2.5
+    roll_count: int = 10
+    physics_steps: int = 30
+    camera_zoom: float = 1.0
+    slow_motion: bool = False
+    sound_enabled: bool = True
+
+@dataclass
+class DiceAnimationFrame:
+    """Кадр анимации кубика."""
+    frame: int
+    dice_values: List[int]
+    positions: List[tuple]
+    rotations: List[float]
+    scales: List[float]
+    opacities: List[float]
+    is_final: bool = False
+    total: int = 0
+    is_critical: bool = False
+    is_fumble: bool = False
+    camera_x: float = 0
+    camera_y: float = 0
+    camera_zoom: float = 1.0
+
+class CinematicDiceSystem:
+    """
+    Система кинематографической визуализации кубиков.
+    Получает данные от Universal Dice Engine.
+    Создаёт анимацию на игровом столе.
+    """
+    
+    # Конфигурации режимов
+    _MODES = {
+        DiceMode.FAST: {
+            'duration': 1.0,
+            'roll_count': 5,
+            'physics_steps': 10,
+            'camera_zoom': 1.0,
+            'slow_motion': False
+        },
+        DiceMode.STANDARD: {
+            'duration': 2.5,
+            'roll_count': 10,
+            'physics_steps': 30,
+            'camera_zoom': 1.0,
+            'slow_motion': False
+        },
+        DiceMode.CINEMATIC: {
+            'duration': 4.5,
+            'roll_count': 20,
+            'physics_steps': 50,
+            'camera_zoom': 1.3,
+            'slow_motion': True
+        }
+    }
+    
+    def __init__(self):
+        self._event_listeners: Dict[DiceEventType, List[Callable]] = {}
+        self._current_animation: Optional[DiceAnimationFrame] = None
+    
+    def get_mode_config(self, mode: DiceMode) -> dict:
+        """Возвращает конфигурацию для режима."""
+        return self._MODES.get(mode, self._MODES[DiceMode.STANDARD])
+    
+    def generate_animation_frames(self, result: RollResult, mode: DiceMode = DiceMode.STANDARD) -> List[DiceAnimationFrame]:
+        """
+        Генерирует кадры анимации для броска.
+        """
+        config = self.get_mode_config(mode)
+        total_frames = int(config['duration'] * 20)  # 20 FPS
+        frames = []
+        
+        # Данные кубиков
+        dice_count = result.count
+        dice_values = result.results
+        
+        # Начальное состояние (кубики появляются)
+        start_positions = []
+        start_rotations = []
+        start_scales = []
+        start_opacities = []
+        
+        for i in range(dice_count):
+            angle = (i / dice_count) * 2 * math.pi
+            radius = 50 + random.uniform(-20, 20)
+            x = math.cos(angle) * radius + random.uniform(-30, 30)
+            y = -math.sin(angle) * radius + random.uniform(-30, 30) - 200  # Появляются сверху
+            start_positions.append((x, y))
+            start_rotations.append(random.uniform(0, 360))
+            start_scales.append(0.1)
+            start_opacities.append(0)
+        
+        # Добавляем начальный кадр
+        frames.append(DiceAnimationFrame(
+            frame=0,
+            dice_values=dice_values,
+            positions=start_positions,
+            rotations=start_rotations,
+            scales=start_scales,
+            opacities=start_opacities,
+            is_final=False
+        ))
+        
+        # Промежуточные кадры (физика)
+        for frame in range(1, total_frames):
+            progress = frame / total_frames
+            
+            # Вычисляем позиции с физикой
+            positions = []
+            rotations = []
+            scales = []
+            opacities = []
+            
+            for i in range(dice_count):
+                # Падение с ускорением
+                fall_progress = min(1, progress * 1.5)
+                if mode == DiceMode.CINEMATIC:
+                    fall_progress = min(1, progress * 1.2)
+                
+                # Синусоидальное движение для реалистичности
+                bounce = abs(math.sin(fall_progress * math.pi * 3)) * 30 * (1 - fall_progress)
+                
+                # Основная позиция
+                target_x = (i - (dice_count - 1) / 2) * 60 + random.uniform(-5, 5) * (1 - progress)
+                target_y = -math.cos(fall_progress * math.pi * 1.5) * 100 + 20 + bounce
+                
+                positions.append((target_x, target_y))
+                
+                # Вращение
+                rot = frame * (2 + i * 0.5) + random.uniform(-10, 10)
+                rotations.append(rot)
+                
+                # Масштаб
+                if mode == DiceMode.CINEMATIC and frame < total_frames * 0.3:
+                    scale = 0.1 + 0.9 * (progress / 0.3)  # Постепенное появление
+                else:
+                    scale = min(1, 0.3 + 0.7 * (1 - math.exp(-progress * 3)))
+                scales.append(min(1, scale))
+                
+                # Прозрачность
+                if mode == DiceMode.FAST:
+                    opacity = min(1, progress * 4)
+                else:
+                    opacity = min(1, progress * 3)
+                opacities.append(opacity)
+            
+            # Финальный кадр
+            is_final = (frame == total_frames - 1)
+            
+            frames.append(DiceAnimationFrame(
+                frame=frame,
+                dice_values=dice_values,
+                positions=positions,
+                rotations=rotations,
+                scales=scales,
+                opacities=opacities,
+                is_final=is_final,
+                total=result.final_total,
+                is_critical=result.is_critical,
+                is_fumble=result.is_fumble,
+                camera_x=0,
+                camera_y=0,
+                camera_zoom=config['camera_zoom']
+            ))
+        
+        # Финальный кадр с подсветкой результата
+        final_positions = []
+        final_rotations = []
+        for i in range(dice_count):
+            final_x = (i - (dice_count - 1) / 2) * 70
+            final_y = random.uniform(-5, 5)
+            final_positions.append((final_x, final_y))
+            final_rotations.append(random.choice([0, 90, 180, 270]))
+        
+        frames.append(DiceAnimationFrame(
+            frame=total_frames,
+            dice_values=dice_values,
+            positions=final_positions,
+            rotations=final_rotations,
+            scales=[1.0] * dice_count,
+            opacities=[1.0] * dice_count,
+            is_final=True,
+            total=result.final_total,
+            is_critical=result.is_critical,
+            is_fumble=result.is_fumble,
+            camera_x=0,
+            camera_y=0,
+            camera_zoom=config['camera_zoom'] * 1.2 if result.is_critical or result.is_fumble else config['camera_zoom']
+        ))
+        
+        return frames
+    
+    def generate_sound_events(self, mode: DiceMode, is_critical: bool = False, is_fumble: bool = False) -> List[dict]:
+        """Генерирует звуковые события для анимации."""
+        events = []
+        
+        if mode == DiceMode.FAST:
+            events.append({'time': 0.0, 'sound': 'dice_roll.wav', 'volume': 0.5})
+            events.append({'time': 0.5, 'sound': 'dice_land.wav', 'volume': 0.3})
+        elif mode == DiceMode.STANDARD:
+            events.append({'time': 0.0, 'sound': 'dice_roll.wav', 'volume': 0.7})
+            events.append({'time': 0.5, 'sound': 'dice_bounce.wav', 'volume': 0.4})
+            events.append({'time': 1.2, 'sound': 'dice_bounce.wav', 'volume': 0.3})
+            events.append({'time': 2.0, 'sound': 'dice_land.wav', 'volume': 0.5})
+        else:  # CINEMATIC
+            events.append({'time': 0.0, 'sound': 'dice_roll_cinematic.wav', 'volume': 0.8})
+            events.append({'time': 0.8, 'sound': 'dice_bounce.wav', 'volume': 0.5})
+            events.append({'time': 1.6, 'sound': 'dice_bounce.wav', 'volume': 0.4})
+            events.append({'time': 2.4, 'sound': 'dice_bounce.wav', 'volume': 0.3})
+            events.append({'time': 3.5, 'sound': 'dice_land_cinematic.wav', 'volume': 0.6})
+        
+        # Критические звуки
+        if is_critical:
+            events.append({'time': 3.8, 'sound': 'critical_success.wav', 'volume': 1.0})
+        if is_fumble:
+            events.append({'time': 3.8, 'sound': 'critical_failure.wav', 'volume': 1.0})
+        
+        return events
+    
+    def get_animation_data(self, result: RollResult, mode: DiceMode) -> dict:
+        """Возвращает полные данные анимации."""
+        frames = self.generate_animation_frames(result, mode)
+        sounds = self.generate_sound_events(mode, result.is_critical, result.is_fumble)
+        
+        return {
+            'roll_id': result.roll_id,
+            'mode': mode.value,
+            'duration': self._MODES[mode]['duration'],
+            'frames': [f.__dict__ for f in frames],
+            'sounds': sounds,
+            'result': result.to_dict(),
+            'critical_type': 'critical_success' if result.is_critical else 'critical_failure' if result.is_fumble else None
+        }
+
+# Создаём глобальный экземпляр
+cinematic_dice = CinematicDiceSystem()
+
+# ============================================================
+# 4. DICE ENGINE (ОБНОВЛЁННЫЙ ДЛЯ CINEMATIC)
 # ============================================================
 
 @dataclass
 class RollRequest:
     """Запрос на бросок кубиков."""
-    dice_type: str  # d4, d6, d8, d10, d12, d20, d100
+    dice_type: str
     count: int = 1
     modifier: int = 0
     reason: str = ''
@@ -224,22 +465,8 @@ class RollRequest:
     room_id: int = 0
     advantage: bool = False
     disadvantage: bool = False
-    custom_modifiers: List[Dict] = field(default_factory=list)  # [{"type": "bonus", "value": 2, "reason": "Bless"}]
-    
-    def to_dict(self) -> dict:
-        return {
-            'dice_type': self.dice_type,
-            'count': self.count,
-            'modifier': self.modifier,
-            'reason': self.reason,
-            'visibility': self.visibility.value,
-            'user_id': self.user_id,
-            'character_id': self.character_id,
-            'room_id': self.room_id,
-            'advantage': self.advantage,
-            'disadvantage': self.disadvantage,
-            'custom_modifiers': self.custom_modifiers
-        }
+    mode: DiceMode = DiceMode.STANDARD
+    custom_modifiers: List[Dict] = field(default_factory=list)
 
 @dataclass
 class RollResult:
@@ -259,145 +486,55 @@ class RollResult:
     room_id: int = 0
     roll_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
-    advantage_used: bool = False
-    disadvantage_used: bool = False
-    custom_modifiers_applied: List[Dict] = field(default_factory=list)
-    
-    def to_dict(self) -> dict:
-        return {
-            'roll_id': self.roll_id,
-            'dice_type': self.dice_type,
-            'count': self.count,
-            'modifier': self.modifier,
-            'results': self.results,
-            'total': self.total,
-            'final_total': self.final_total,
-            'is_critical': self.is_critical,
-            'is_fumble': self.is_fumble,
-            'visibility': self.visibility.value,
-            'reason': self.reason,
-            'user_id': self.user_id,
-            'character_id': self.character_id,
-            'room_id': self.room_id,
-            'timestamp': self.timestamp.isoformat(),
-            'advantage_used': self.advantage_used,
-            'disadvantage_used': self.disadvantage_used,
-            'custom_modifiers_applied': self.custom_modifiers_applied
-        }
-    
-    def get_animation_data(self) -> dict:
-        """Возвращает данные для анимации кубиков."""
-        return {
-            'roll_id': self.roll_id,
-            'dice_type': self.dice_type,
-            'count': self.count,
-            'results': self.results,
-            'total': self.total,
-            'final_total': self.final_total,
-            'is_critical': self.is_critical,
-            'is_fumble': self.is_fumble,
-            'color': '#ffd700' if self.is_critical else '#ff4444' if self.is_fumble else '#ffffff',
-            'critical_type': 'critical_success' if self.is_critical else 'critical_failure' if self.is_fumble else None
-        }
+    mode: DiceMode = DiceMode.STANDARD
 
 class DiceEngine:
-    """
-    Универсальная система бросков кубиков.
-    Не знает про D&D, Vampire или другие системы.
-    Только кубики.
-    """
+    """Универсальная система бросков кубиков с поддержкой кинематографического режима."""
     
-    # Доступные типы кубиков и их максимальные значения
     _DICE_SIDES = {
-        'd2': 2,
-        'd4': 4,
-        'd6': 6,
-        'd8': 8,
-        'd10': 10,
-        'd12': 12,
-        'd20': 20,
-        'd100': 100
+        'd2': 2, 'd4': 4, 'd6': 6, 'd8': 8,
+        'd10': 10, 'd12': 12, 'd20': 20, 'd100': 100
     }
     
     def __init__(self):
-        self._event_listeners: Dict[DiceEventType, List[Callable]] = {}
         self._history: List[RollResult] = []
     
-    # ===== ОСНОВНЫЕ МЕТОДЫ БРОСКОВ =====
-    
     def roll(self, request: RollRequest) -> RollResult:
-        """
-        Выполняет бросок кубиков.
-        Единственный метод для всех бросков.
-        """
-        # Проверяем валидность dice_type
+        """Выполняет бросок кубиков."""
         dice_type = request.dice_type.lower()
         if dice_type not in self._DICE_SIDES:
             raise ValueError(f"Неизвестный тип кубика: {dice_type}")
         
         max_value = self._DICE_SIDES[dice_type]
         
-        # Обработка преимущества/помехи
         results = []
         if request.advantage or request.disadvantage:
             if dice_type == 'd20' and request.count == 1:
-                # Два броска
                 roll1 = random.randint(1, max_value)
                 roll2 = random.randint(1, max_value)
-                
                 if request.advantage:
                     results = [max(roll1, roll2)]
                 else:
                     results = [min(roll1, roll2)]
-                
-                # Сохраняем оба броска для истории
-                self._last_rolls = [roll1, roll2]
             else:
-                # Преимущество/помеха только для d20
                 results = [random.randint(1, max_value) for _ in range(request.count)]
         else:
             results = [random.randint(1, max_value) for _ in range(request.count)]
         
         total = sum(results)
+        final_total = total + request.modifier
         
-        # Применяем модификаторы
-        total_modifier = request.modifier
-        custom_modifiers_applied = []
-        
-        for mod in request.custom_modifiers:
-            if mod.get('type') == 'bonus':
-                total_modifier += mod.get('value', 0)
-                custom_modifiers_applied.append(mod)
-            elif mod.get('type') == 'penalty':
-                total_modifier -= mod.get('value', 0)
-                custom_modifiers_applied.append(mod)
-        
-        final_total = total + total_modifier
-        
-        # Определяем критические результаты (только для d20)
         is_critical = False
         is_fumble = False
         if dice_type == 'd20' and request.count == 1:
-            if request.advantage:
-                # При преимуществе критический успех если хотя бы один 20
-                is_critical = any(r == 20 for r in self._last_rolls if hasattr(self, '_last_rolls'))
-                # Критический провал если оба 1
-                is_fumble = all(r == 1 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
-            elif request.disadvantage:
-                # При помехе критический провал если хотя бы один 1
-                is_fumble = any(r == 1 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
-                # Критический успех если оба 20
-                is_critical = all(r == 20 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
-            else:
-                # Обычный бросок
-                roll = results[0] if results else 0
-                is_critical = roll == 20
-                is_fumble = roll == 1
+            roll = results[0] if results else 0
+            is_critical = roll == 20
+            is_fumble = roll == 1
         
-        result = RollResult(
+        return RollResult(
             dice_type=dice_type,
             count=request.count,
-            modifier=total_modifier,
+            modifier=request.modifier,
             results=results,
             total=total,
             final_total=final_total,
@@ -408,33 +545,11 @@ class DiceEngine:
             user_id=request.user_id,
             character_id=request.character_id,
             room_id=request.room_id,
-            advantage_used=request.advantage,
-            disadvantage_used=request.disadvantage,
-            custom_modifiers_applied=custom_modifiers_applied
+            mode=request.mode
         )
-        
-        # Публикуем события
-        self._publish_event(DiceEventType.ROLL_STARTED, result)
-        
-        if is_critical:
-            self._publish_event(DiceEventType.CRITICAL_SUCCESS, result)
-        elif is_fumble:
-            self._publish_event(DiceEventType.CRITICAL_FAILURE, result)
-        
-        # Сохраняем в историю
-        self._history.append(result)
-        
-        # Публикуем завершение
-        self._publish_event(DiceEventType.ROLL_COMPLETED, result)
-        
-        return result
     
     def roll_formula(self, formula: str, **kwargs) -> RollResult:
-        """
-        Выполняет бросок по формуле (например: '2d6+4').
-        Поддерживает: 1d20, 2d6, 4d6, 3d8+2, 1d100
-        """
-        # Парсим формулу
+        """Выполняет бросок по формуле."""
         match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
         if not match:
             raise ValueError(f"Неверный формат формулы: {formula}")
@@ -454,184 +569,15 @@ class DiceEngine:
             room_id=kwargs.get('room_id', 0),
             advantage=kwargs.get('advantage', False),
             disadvantage=kwargs.get('disadvantage', False),
+            mode=kwargs.get('mode', DiceMode.STANDARD),
             custom_modifiers=kwargs.get('custom_modifiers', [])
         )
-        
         return self.roll(request)
-    
-    # ===== ПАРСИНГ ФОРМУЛ =====
-    
-    def parse_formula(self, formula: str) -> dict:
-        """
-        Разбирает формулу на составляющие.
-        Возвращает: {'count': int, 'dice_type': str, 'modifier': int}
-        """
-        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
-        if not match:
-            raise ValueError(f"Неверный формат формулы: {formula}")
-        
-        return {
-            'count': int(match.group(1) or 1),
-            'dice_type': f"d{match.group(2)}",
-            'modifier': int(match.group(3) or 0) if match.group(3) else 0
-        }
-    
-    # ===== ВИЗУАЛИЗАЦИЯ =====
-    
-    def get_animation_data(self, result: RollResult) -> dict:
-        """Возвращает данные для анимации кубиков."""
-        return result.get_animation_data()
-    
-    def generate_dice_animation(self, result: RollResult) -> List[dict]:
-        """
-        Генерирует анимацию для кубиков.
-        Возвращает список кадров анимации.
-        """
-        animation = []
-        
-        # Начальное состояние
-        animation.append({
-            'frame': 0,
-            'dice': result.results.copy(),
-            'positions': [(random.randint(-100, 100), random.randint(-100, 100)) for _ in result.results],
-            'rotations': [random.randint(0, 360) for _ in result.results],
-            'scale': 0.1
-        })
-        
-        # Промежуточные кадры (вращение и движение)
-        for frame in range(1, 20):
-            progress = frame / 20
-            positions = []
-            rotations = []
-            for i in range(len(result.results)):
-                angle = progress * 720 + random.uniform(-10, 10)
-                x = math.sin(angle) * 50 * (1 - progress)
-                y = -math.cos(angle) * 50 * (1 - progress) + 50 * progress
-                positions.append((x, y))
-                rotations.append(angle)
-            
-            animation.append({
-                'frame': frame,
-                'dice': result.results.copy(),
-                'positions': positions,
-                'rotations': rotations,
-                'scale': 0.1 + 0.9 * min(1, progress * 2)
-            })
-        
-        # Финальное состояние
-        final_positions = []
-        for i in range(len(result.results)):
-            final_positions.append((
-                (i - len(result.results) / 2) * 80 + random.uniform(-10, 10),
-                random.uniform(-10, 10)
-            ))
-        
-        animation.append({
-            'frame': 21,
-            'dice': result.results.copy(),
-            'positions': final_positions,
-            'rotations': [0, 90, 180, 270, 0, 90, 180, 270][:len(result.results)],
-            'scale': 1.0,
-            'final': True,
-            'total': result.final_total,
-            'is_critical': result.is_critical,
-            'is_fumble': result.is_fumble
-        })
-        
-        return animation
-    
-    # ===== ИСТОРИЯ =====
-    
-    def get_history(self, limit: int = 50, room_id: int = None) -> List[RollResult]:
-        """Возвращает историю бросков."""
-        history = self._history
-        if room_id:
-            history = [r for r in history if r.room_id == room_id]
-        return history[-limit:]
-    
-    def save_history_to_db(self, result: RollResult) -> bool:
-        """Сохраняет результат броска в базу данных."""
-        session = Session()
-        try:
-            history_entry = DiceHistory(
-                room_id=result.room_id,
-                user_id=result.user_id,
-                character_id=result.character_id,
-                dice_type=result.dice_type,
-                count=result.count,
-                modifier=result.modifier,
-                formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
-                results=json.dumps(result.results),
-                total=result.total,
-                final_total=result.final_total,
-                is_critical=result.is_critical,
-                is_fumble=result.is_fumble,
-                visibility=result.visibility.value,
-                reason=result.reason,
-                timestamp=result.timestamp,
-                advantage_used=result.advantage_used,
-                disadvantage_used=result.disadvantage_used
-            )
-            session.add(history_entry)
-            session.commit()
-            return True
-        except Exception as e:
-            session.rollback()
-            print(f"Error saving dice history: {e}")
-            return False
-        finally:
-            session.close()
-    
-    def clear_history(self):
-        """Очищает историю бросков."""
-        self._history = []
-    
-    # ===== СОБЫТИЯ =====
-    
-    def subscribe(self, event_type: DiceEventType, callback: Callable):
-        """Подписывается на события бросков."""
-        if event_type not in self._event_listeners:
-            self._event_listeners[event_type] = []
-        self._event_listeners[event_type].append(callback)
-    
-    def _publish_event(self, event_type: DiceEventType, data: RollResult):
-        """Публикует событие."""
-        if event_type in self._event_listeners:
-            for callback in self._event_listeners[event_type]:
-                try:
-                    callback(event_type, data)
-                except Exception as e:
-                    print(f"Error in dice event callback: {e}")
-    
-    # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
-    
-    def get_supported_dice(self) -> List[str]:
-        """Возвращает список поддерживаемых типов кубиков."""
-        return list(self._DICE_SIDES.keys())
-    
-    def get_max_value(self, dice_type: str) -> int:
-        """Возвращает максимальное значение для типа кубика."""
-        return self._DICE_SIDES.get(dice_type.lower(), 0)
-    
-    def get_dice_emoji(self, dice_type: str) -> str:
-        """Возвращает эмодзи для типа кубика."""
-        emojis = {
-            'd2': '🪙',
-            'd4': '🔺',
-            'd6': '🎲',
-            'd8': '🔶',
-            'd10': '💠',
-            'd12': '🔷',
-            'd20': '✨',
-            'd100': '💯'
-        }
-        return emojis.get(dice_type.lower(), '🎲')
 
-# Создаём глобальный экземпляр Dice Engine
 dice_engine = DiceEngine()
 
 # ============================================================
-# 4. МИГРАЦИЯ
+# 5. МИГРАЦИЯ
 # ============================================================
 
 def migrate_database():
@@ -647,10 +593,6 @@ def migrate_database():
             print("🔄 Создаём таблицу Dice History...")
             Base.metadata.create_all(engine)
             print("✅ Таблица истории бросков создана!")
-        if 'action_logs' not in inspector.get_table_names():
-            print("🔄 Создаём таблицу Action Logs...")
-            Base.metadata.create_all(engine)
-            print("✅ Таблица логов создана!")
     except Exception as e:
         print(f"⚠️ Ошибка миграции: {e}")
     finally:
@@ -660,7 +602,7 @@ Base.metadata.create_all(engine)
 migrate_database()
 
 # ============================================================
-# 5. FASTAPI
+# 6. FASTAPI
 # ============================================================
 
 app = FastAPI()
@@ -675,7 +617,7 @@ os.makedirs(MAP_DIR, exist_ok=True)
 connections = {}
 
 # ============================================================
-# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================
 
 def hash_password(password):
@@ -720,13 +662,19 @@ def get_current_user(request):
 def generate_room_id():
     return secrets.token_urlsafe(8)
 
+async def broadcast_to_room(room_id: int, message: dict):
+    for ws in connections.get(room_id, []):
+        try:
+            await ws.send_text(json.dumps(message))
+        except:
+            pass
+
 # ============================================================
-# 7. API: DICE ENGINE
+# 8. API: DICE ENGINE С КИНОШНЫМИ КУБИКАМИ
 # ============================================================
 
 @app.post("/api/dice/roll")
 async def roll_dice(request: Request, data: dict):
-    """Выполняет бросок кубиков."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
@@ -740,23 +688,29 @@ async def roll_dice(request: Request, data: dict):
     character_id = data.get('character_id', 0)
     advantage = data.get('advantage', False)
     disadvantage = data.get('disadvantage', False)
-    custom_modifiers = data.get('custom_modifiers', [])
+    mode_str = data.get('mode', 'standard')
+    
+    try:
+        mode = DiceMode(mode_str)
+    except ValueError:
+        mode = DiceMode.STANDARD
     
     try:
         visibility_enum = DiceVisibility(visibility)
     except ValueError:
         visibility_enum = DiceVisibility.PUBLIC
     
-    # Получаем комнату
     room_id = 0
     if room_id_str:
         session = Session()
         room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
         if room:
             room_id = room.id
+            # Используем режим комнаты, если не указан конкретный
+            if not data.get('mode'):
+                mode = DiceMode(room.dice_mode)
         session.close()
     
-    # Создаём запрос
     roll_request = RollRequest(
         dice_type=dice_type,
         count=count,
@@ -768,198 +722,109 @@ async def roll_dice(request: Request, data: dict):
         room_id=room_id,
         advantage=advantage,
         disadvantage=disadvantage,
-        custom_modifiers=custom_modifiers
+        mode=mode
     )
     
-    # Выполняем бросок
     result = dice_engine.roll(roll_request)
     
     # Сохраняем в БД
-    dice_engine.save_history_to_db(result)
+    session = Session()
+    try:
+        history = DiceHistory(
+            room_id=result.room_id,
+            user_id=result.user_id,
+            character_id=result.character_id,
+            dice_type=result.dice_type,
+            count=result.count,
+            modifier=result.modifier,
+            formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
+            results=json.dumps(result.results),
+            total=result.total,
+            final_total=result.final_total,
+            is_critical=result.is_critical,
+            is_fumble=result.is_fumble,
+            visibility=result.visibility.value,
+            reason=result.reason,
+            timestamp=result.timestamp,
+            dice_mode=mode.value
+        )
+        session.add(history)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+    finally:
+        session.close()
     
-    # Отправляем всем в комнате (если публичный)
+    # Генерируем кинематографическую анимацию
+    animation_data = cinematic_dice.get_animation_data(result, mode)
+    
+    # Отправляем всем в комнате
     if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
         await broadcast_to_room(room_id, {
-            'type': 'dice_roll',
+            'type': 'dice_roll_cinematic',
             'result': result.to_dict(),
-            'animation': result.get_animation_data(),
-            'dice_animation': dice_engine.generate_dice_animation(result)
+            'animation': animation_data
         })
     
     return {
         'success': True,
         'result': result.to_dict(),
-        'animation': result.get_animation_data(),
-        'dice_animation': dice_engine.generate_dice_animation(result)
+        'animation': animation_data
     }
 
-@app.post("/api/dice/roll/formula")
-async def roll_dice_formula(request: Request, data: dict):
-    """Выполняет бросок по формуле (например: 2d6+4)."""
+@app.post("/api/dice/mode")
+async def set_dice_mode(request: Request, data: dict):
+    """Устанавливает режим кубиков для комнаты."""
     user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
+    if not user or user.role != 'gm':
+        return {"success": False, "message": "Только GM может менять режим"}
     
-    formula = data.get('formula', '1d20')
-    modifier = data.get('modifier', 0)
-    reason = data.get('reason', formula)
-    visibility = data.get('visibility', 'public')
     room_id_str = data.get('room_id')
-    character_id = data.get('character_id', 0)
-    advantage = data.get('advantage', False)
-    disadvantage = data.get('disadvantage', False)
-    custom_modifiers = data.get('custom_modifiers', [])
+    mode_str = data.get('mode', 'standard')
+    
+    if not room_id_str:
+        return {"success": False, "message": "Не указан room_id"}
     
     try:
-        visibility_enum = DiceVisibility(visibility)
+        mode = DiceMode(mode_str)
     except ValueError:
-        visibility_enum = DiceVisibility.PUBLIC
+        return {"success": False, "message": f"Неизвестный режим: {mode_str}"}
     
-    room_id = 0
-    if room_id_str:
-        session = Session()
-        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-        if room:
-            room_id = room.id
-        session.close()
-    
-    try:
-        result = dice_engine.roll_formula(
-            formula=formula,
-            modifier=modifier,
-            reason=reason,
-            visibility=visibility_enum,
-            user_id=user.id,
-            character_id=character_id,
-            room_id=room_id,
-            advantage=advantage,
-            disadvantage=disadvantage,
-            custom_modifiers=custom_modifiers
-        )
-        
-        dice_engine.save_history_to_db(result)
-        
-        if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
-            await broadcast_to_room(room_id, {
-                'type': 'dice_roll',
-                'result': result.to_dict(),
-                'animation': result.get_animation_data(),
-                'dice_animation': dice_engine.generate_dice_animation(result)
-            })
-        
-        return {
-            'success': True,
-            'result': result.to_dict(),
-            'animation': result.get_animation_data(),
-            'dice_animation': dice_engine.generate_dice_animation(result)
-        }
-    except ValueError as e:
-        return {"success": False, "message": str(e)}
-
-@app.get("/api/dice/history/{room_id}")
-async def get_dice_history(room_id: str, limit: int = 50):
-    """Получает историю бросков в комнате."""
     session = Session()
     try:
-        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
         if not room:
             return {"success": False, "message": "Комната не найдена"}
         
-        history = session.query(DiceHistory).filter_by(room_id=room.id).order_by(
-            DiceHistory.timestamp.desc()
-        ).limit(limit).all()
+        room.dice_mode = mode.value
+        session.commit()
         
-        return {
-            'success': True,
-            'history': [
-                {
-                    'id': h.id,
-                    'dice_type': h.dice_type,
-                    'count': h.count,
-                    'modifier': h.modifier,
-                    'formula': h.formula,
-                    'results': json.loads(h.results) if h.results else [],
-                    'total': h.total,
-                    'final_total': h.final_total,
-                    'is_critical': h.is_critical,
-                    'is_fumble': h.is_fumble,
-                    'visibility': h.visibility,
-                    'reason': h.reason,
-                    'timestamp': h.timestamp.isoformat(),
-                    'advantage_used': h.advantage_used,
-                    'disadvantage_used': h.disadvantage_used
-                }
-                for h in history
-            ]
-        }
+        await broadcast_to_room(room.id, {
+            'type': 'dice_mode_changed',
+            'mode': mode.value
+        })
+        
+        return {'success': True, 'message': f'Режим кубиков изменён на {mode.value}'}
     except Exception as e:
+        session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.get("/api/dice/types")
-async def get_dice_types():
-    """Возвращает все поддерживаемые типы кубиков."""
+@app.get("/api/dice/modes")
+async def get_dice_modes():
+    """Возвращает все доступные режимы."""
     return {
         'success': True,
-        'dice_types': [
-            {'value': d, 'label': d.upper(), 'max_value': dice_engine.get_max_value(d), 'emoji': dice_engine.get_dice_emoji(d)}
-            for d in dice_engine.get_supported_dice()
+        'modes': [
+            {'value': 'fast', 'label': 'Fast', 'description': 'Быстрый бросок (0.5-1.5 сек)'},
+            {'value': 'standard', 'label': 'Standard', 'description': 'Стандартный бросок (2-3 сек)'},
+            {'value': 'cinematic', 'label': 'Cinematic', 'description': 'Кинематографический бросок (3-5 сек)'}
         ]
     }
 
-@app.post("/api/dice/parse")
-async def parse_dice_formula(data: dict):
-    """Разбирает формулу броска."""
-    formula = data.get('formula', '')
-    if not formula:
-        return {"success": False, "message": "Не указана формула"}
-    
-    try:
-        parsed = dice_engine.parse_formula(formula)
-        return {
-            'success': True,
-            'parsed': parsed
-        }
-    except ValueError as e:
-        return {"success": False, "message": str(e)}
-
-@app.get("/api/dice/advantage/{character_id}")
-async def roll_with_advantage(character_id: int, data: dict):
-    """Выполняет бросок с преимуществом."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    # Используем преимущество
-    data['advantage'] = True
-    return await roll_dice(request, data)
-
-@app.get("/api/dice/disadvantage/{character_id}")
-async def roll_with_disadvantage(character_id: int, data: dict):
-    """Выполняет бросок с помехой."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    # Используем помеху
-    data['disadvantage'] = True
-    return await roll_dice(request, data)
-
 # ============================================================
-# 8. WEBSOCKET HELPER
-# ============================================================
-
-async def broadcast_to_room(room_id: int, message: dict):
-    """Отправляет сообщение всем в комнате."""
-    for ws in connections.get(room_id, []):
-        try:
-            await ws.send_text(json.dumps(message))
-        except:
-            pass
-
-# ============================================================
-# 9. БЫСТРЫЙ СТАРТ
+# 9. СТРАНИЦЫ
 # ============================================================
 
 @app.get("/")
@@ -1069,7 +934,8 @@ async def room_page(request: Request, room_id: str):
         "user": user,
         "room": room,
         "character": character,
-        "is_gm": room.gm_id == user.id
+        "is_gm": room.gm_id == user.id,
+        "dice_mode": room.dice_mode
     })
 
 # ============================================================
@@ -1109,7 +975,7 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                     })
                 
                 elif msg_type == 'dice_roll':
-                    # Бросок кубиков через WebSocket
+                    # Обработка броска через WebSocket
                     dice_type = msg.get('dice_type', 'd20')
                     count = msg.get('count', 1)
                     modifier = msg.get('modifier', 0)
@@ -1118,7 +984,12 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                     character_id = msg.get('character_id', 0)
                     advantage = msg.get('advantage', False)
                     disadvantage = msg.get('disadvantage', False)
-                    custom_modifiers = msg.get('custom_modifiers', [])
+                    mode_str = msg.get('mode', room.dice_mode)
+                    
+                    try:
+                        mode = DiceMode(mode_str)
+                    except ValueError:
+                        mode = DiceMode(room.dice_mode)
                     
                     try:
                         visibility_enum = DiceVisibility(visibility)
@@ -1136,77 +1007,55 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                         room_id=room.id,
                         advantage=advantage,
                         disadvantage=disadvantage,
-                        custom_modifiers=custom_modifiers
+                        mode=mode
                     )
                     
                     result = dice_engine.roll(roll_request)
-                    dice_engine.save_history_to_db(result)
+                    
+                    # Сохраняем в БД
+                    session2 = Session()
+                    try:
+                        history = DiceHistory(
+                            room_id=result.room_id,
+                            user_id=result.user_id,
+                            character_id=result.character_id,
+                            dice_type=result.dice_type,
+                            count=result.count,
+                            modifier=result.modifier,
+                            formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
+                            results=json.dumps(result.results),
+                            total=result.total,
+                            final_total=result.final_total,
+                            is_critical=result.is_critical,
+                            is_fumble=result.is_fumble,
+                            visibility=result.visibility.value,
+                            reason=result.reason,
+                            timestamp=result.timestamp,
+                            dice_mode=mode.value
+                        )
+                        session2.add(history)
+                        session2.commit()
+                    except Exception as e:
+                        session2.rollback()
+                    finally:
+                        session2.close()
+                    
+                    animation_data = cinematic_dice.get_animation_data(result, mode)
                     
                     if visibility_enum == DiceVisibility.PUBLIC:
                         await broadcast_to_room(room.id, {
-                            'type': 'dice_roll',
+                            'type': 'dice_roll_cinematic',
                             'result': result.to_dict(),
-                            'animation': result.get_animation_data(),
-                            'dice_animation': dice_engine.generate_dice_animation(result)
+                            'animation': animation_data
                         })
                     else:
-                        # Секретный бросок — только GM
                         gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
                         if gm:
                             await websocket.send_text(json.dumps({
                                 'type': 'dice_roll_secret',
                                 'result': result.to_dict(),
-                                'animation': result.get_animation_data()
+                                'animation': animation_data
                             }))
-                
-                elif msg_type == 'dice_formula':
-                    formula = msg.get('formula', '1d20')
-                    modifier = msg.get('modifier', 0)
-                    reason = msg.get('reason', formula)
-                    visibility = msg.get('visibility', 'public')
-                    character_id = msg.get('character_id', 0)
-                    advantage = msg.get('advantage', False)
-                    disadvantage = msg.get('disadvantage', False)
-                    
-                    try:
-                        visibility_enum = DiceVisibility(visibility)
-                    except ValueError:
-                        visibility_enum = DiceVisibility.PUBLIC
-                    
-                    try:
-                        result = dice_engine.roll_formula(
-                            formula=formula,
-                            modifier=modifier,
-                            reason=reason,
-                            visibility=visibility_enum,
-                            user_id=msg.get('user_id', 0),
-                            character_id=character_id,
-                            room_id=room.id,
-                            advantage=advantage,
-                            disadvantage=disadvantage
-                        )
-                        
-                        dice_engine.save_history_to_db(result)
-                        
-                        if visibility_enum == DiceVisibility.PUBLIC:
-                            await broadcast_to_room(room.id, {
-                                'type': 'dice_roll',
-                                'result': result.to_dict(),
-                                'animation': result.get_animation_data(),
-                                'dice_animation': dice_engine.generate_dice_animation(result)
-                            })
-                        else:
-                            gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
-                            if gm:
-                                await websocket.send_text(json.dumps({
-                                    'type': 'dice_roll_secret',
-                                    'result': result.to_dict()
-                                }))
-                    except ValueError as e:
-                        await websocket.send_text(json.dumps({
-                            'type': 'error',
-                            'message': f"Ошибка формулы: {str(e)}"
-                        }))
                 
             except json.JSONDecodeError:
                 pass
