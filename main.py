@@ -34,6 +34,25 @@ class RoomState(str, Enum):
     PAUSED = "paused"
     FINISHED = "finished"
 
+class TurnMode(str, Enum):
+    FREE = "free"
+    INITIATIVE = "initiative"
+    SCRIPT = "script"
+    GM_CONTROLLED = "gm_controlled"
+
+class TurnEventType(str, Enum):
+    TURN_STARTED = "turn_started"
+    TURN_ENDED = "turn_ended"
+    ROUND_STARTED = "round_started"
+    ROUND_ENDED = "round_ended"
+    COMBAT_STARTED = "combat_started"
+    COMBAT_ENDED = "combat_ended"
+    PLAYER_SKIPPED = "player_skipped"
+    TIMER_EXPIRED = "timer_expired"
+    TURN_ORDER_CHANGED = "turn_order_changed"
+    PARTICIPANT_ADDED = "participant_added"
+    PARTICIPANT_REMOVED = "participant_removed"
+
 class DiceType(str, Enum):
     D2 = "d2"
     D4 = "d4"
@@ -52,14 +71,6 @@ class DiceMode(str, Enum):
     FAST = "fast"
     STANDARD = "standard"
     CINEMATIC = "cinematic"
-
-class DiceEventType(str, Enum):
-    ROLL_STARTED = "roll_started"
-    ANIMATION_STARTED = "animation_started"
-    ANIMATION_FINISHED = "animation_finished"
-    ROLL_COMPLETED = "roll_completed"
-    CRITICAL_SUCCESS = "critical_success"
-    CRITICAL_FAILURE = "critical_failure"
 
 # ============================================================
 # 2. БАЗА ДАННЫХ
@@ -110,26 +121,6 @@ class Character(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
 
-class DiceHistory(Base):
-    __tablename__ = 'dice_history'
-    id = Column(Integer, primary_key=True)
-    room_id = Column(Integer, ForeignKey('game_rooms.id'))
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
-    character_id = Column(Integer, ForeignKey('characters.id'), nullable=True)
-    dice_type = Column(String(10))
-    count = Column(Integer, default=1)
-    modifier = Column(Integer, default=0)
-    formula = Column(String(100))
-    results = Column(JSON, default='[]')
-    total = Column(Integer, default=0)
-    final_total = Column(Integer, default=0)
-    is_critical = Column(Boolean, default=False)
-    is_fumble = Column(Boolean, default=False)
-    visibility = Column(String(20), default='public')
-    reason = Column(String(200), default='')
-    timestamp = Column(DateTime, default=datetime.now)
-    dice_mode = Column(String(20), default='standard')
-
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
     id = Column(Integer, primary_key=True)
@@ -139,6 +130,8 @@ class GameRoom(Base):
     gm_id = Column(Integer, ForeignKey('users.id'))
     password_hash = Column(String, nullable=True)
     state = Column(String(20), default=RoomState.PREPARATION)
+    turn_mode = Column(String(20), default=TurnMode.FREE)
+    turn_timer = Column(Integer, default=0)  # 0 = no limit
     max_players = Column(Integer, default=6)
     is_private = Column(Boolean, default=False)
     current_map = Column(String(255), default='')
@@ -156,7 +149,6 @@ class GameRoom(Base):
     tokens = relationship("GameToken", backref="room", cascade="all, delete-orphan")
     players = relationship("RoomPlayer", backref="room", cascade="all, delete-orphan")
     characters = relationship("Character", backref="room", cascade="all, delete-orphan")
-    dice_history = relationship("DiceHistory", backref="room", cascade="all, delete-orphan")
 
 class RoomPlayer(Base):
     __tablename__ = 'room_players'
@@ -204,380 +196,377 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. CINEMATIC DICE SYSTEM (СИСТЕМА КИНОШНЫХ КУБИКОВ)
+# 3. TURN MANAGER
 # ============================================================
 
 @dataclass
-class DiceAnimationConfig:
-    """Конфигурация анимации кубиков."""
-    mode: DiceMode = DiceMode.STANDARD
-    duration: float = 2.5
-    roll_count: int = 10
-    physics_steps: int = 30
-    camera_zoom: float = 1.0
-    slow_motion: bool = False
-    sound_enabled: bool = True
+class TurnParticipant:
+    """Участник очереди ходов."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    character_id: int = 0
+    name: str = ''
+    initiative: int = 0
+    is_active: bool = True
+    is_skipped: bool = False
+    turn_order: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
-@dataclass
-class DiceAnimationFrame:
-    """Кадр анимации кубика."""
-    frame: int
-    dice_values: List[int]
-    positions: List[tuple]
-    rotations: List[float]
-    scales: List[float]
-    opacities: List[float]
-    is_final: bool = False
-    total: int = 0
-    is_critical: bool = False
-    is_fumble: bool = False
-    camera_x: float = 0
-    camera_y: float = 0
-    camera_zoom: float = 1.0
-
-class CinematicDiceSystem:
+class TurnManager:
     """
-    Система кинематографической визуализации кубиков.
-    Получает данные от Universal Dice Engine.
-    Создаёт анимацию на игровом столе.
+    Универсальная система управления ходами.
+    Не знает о Combat, Character, Skill.
+    Управляет только очередностью.
     """
     
-    # Конфигурации режимов
-    _MODES = {
-        DiceMode.FAST: {
-            'duration': 1.0,
-            'roll_count': 5,
-            'physics_steps': 10,
-            'camera_zoom': 1.0,
-            'slow_motion': False
-        },
-        DiceMode.STANDARD: {
-            'duration': 2.5,
-            'roll_count': 10,
-            'physics_steps': 30,
-            'camera_zoom': 1.0,
-            'slow_motion': False
-        },
-        DiceMode.CINEMATIC: {
-            'duration': 4.5,
-            'roll_count': 20,
-            'physics_steps': 50,
-            'camera_zoom': 1.3,
-            'slow_motion': True
-        }
-    }
+    def __init__(self, room_id: int):
+        self.room_id = room_id
+        self.mode: TurnMode = TurnMode.FREE
+        self.participants: List[TurnParticipant] = []
+        self.current_index: int = -1
+        self.current_round: int = 0
+        self.timer_seconds: int = 0
+        self.timer_active: bool = False
+        self._timer_task: Optional[asyncio.Task] = None
+        self._event_listeners: Dict[TurnEventType, List[Callable]] = {}
+        self._is_combat: bool = False
     
-    def __init__(self):
-        self._event_listeners: Dict[DiceEventType, List[Callable]] = {}
-        self._current_animation: Optional[DiceAnimationFrame] = None
+    # ===== УПРАВЛЕНИЕ УЧАСТНИКАМИ =====
     
-    def get_mode_config(self, mode: DiceMode) -> dict:
-        """Возвращает конфигурацию для режима."""
-        return self._MODES.get(mode, self._MODES[DiceMode.STANDARD])
+    def add_participant(self, participant: TurnParticipant) -> bool:
+        """Добавляет участника в очередь."""
+        if any(p.id == participant.id for p in self.participants):
+            return False
+        self.participants.append(participant)
+        self._sort_participants()
+        self._publish_event(TurnEventType.PARTICIPANT_ADDED, {'participant': participant})
+        return True
     
-    def generate_animation_frames(self, result: RollResult, mode: DiceMode = DiceMode.STANDARD) -> List[DiceAnimationFrame]:
-        """
-        Генерирует кадры анимации для броска.
-        """
-        config = self.get_mode_config(mode)
-        total_frames = int(config['duration'] * 20)  # 20 FPS
-        frames = []
+    def remove_participant(self, participant_id: str) -> bool:
+        """Удаляет участника из очереди."""
+        removed = None
+        for i, p in enumerate(self.participants):
+            if p.id == participant_id:
+                removed = self.participants.pop(i)
+                break
         
-        # Данные кубиков
-        dice_count = result.count
-        dice_values = result.results
+        if removed:
+            self._publish_event(TurnEventType.PARTICIPANT_REMOVED, {'participant': removed})
+            return True
+        return False
+    
+    def get_participant(self, participant_id: str) -> Optional[TurnParticipant]:
+        """Получает участника по ID."""
+        for p in self.participants:
+            if p.id == participant_id:
+                return p
+        return None
+    
+    def get_current_participant(self) -> Optional[TurnParticipant]:
+        """Получает текущего участника."""
+        if 0 <= self.current_index < len(self.participants):
+            return self.participants[self.current_index]
+        return None
+    
+    def _sort_participants(self):
+        """Сортирует участников по инициативе."""
+        self.participants.sort(key=lambda p: p.initiative, reverse=True)
+        for i, p in enumerate(self.participants):
+            p.turn_order = i
+    
+    # ===== УПРАВЛЕНИЕ РЕЖИМАМИ =====
+    
+    def set_mode(self, mode: TurnMode) -> bool:
+        """Устанавливает режим управления ходами."""
+        self.mode = mode
         
-        # Начальное состояние (кубики появляются)
-        start_positions = []
-        start_rotations = []
-        start_scales = []
-        start_opacities = []
+        if mode == TurnMode.FREE:
+            self.current_index = -1
+            self.current_round = 0
+            self._stop_timer()
         
-        for i in range(dice_count):
-            angle = (i / dice_count) * 2 * math.pi
-            radius = 50 + random.uniform(-20, 20)
-            x = math.cos(angle) * radius + random.uniform(-30, 30)
-            y = -math.sin(angle) * radius + random.uniform(-30, 30) - 200  # Появляются сверху
-            start_positions.append((x, y))
-            start_rotations.append(random.uniform(0, 360))
-            start_scales.append(0.1)
-            start_opacities.append(0)
+        self._publish_event(TurnEventType.TURN_ORDER_CHANGED, {'mode': mode.value})
+        return True
+    
+    def start_initiative_mode(self, participants: List[TurnParticipant]) -> bool:
+        """Начинает инициативный режим (бой)."""
+        self.participants = sorted(participants, key=lambda p: p.initiative, reverse=True)
+        for i, p in enumerate(self.participants):
+            p.turn_order = i
+            p.is_active = True
+            p.is_skipped = False
         
-        # Добавляем начальный кадр
-        frames.append(DiceAnimationFrame(
-            frame=0,
-            dice_values=dice_values,
-            positions=start_positions,
-            rotations=start_rotations,
-            scales=start_scales,
-            opacities=start_opacities,
-            is_final=False
-        ))
+        self.current_index = 0
+        self.current_round = 1
+        self._is_combat = True
+        self.mode = TurnMode.INITIATIVE
         
-        # Промежуточные кадры (физика)
-        for frame in range(1, total_frames):
-            progress = frame / total_frames
+        self._publish_event(TurnEventType.COMBAT_STARTED, {
+            'participants': [p.__dict__ for p in self.participants]
+        })
+        self._publish_event(TurnEventType.ROUND_STARTED, {'round': self.current_round})
+        self._start_turn()
+        
+        return True
+    
+    def end_combat(self) -> bool:
+        """Завершает боевой режим."""
+        if not self._is_combat:
+            return False
+        
+        self._is_combat = False
+        self.mode = TurnMode.FREE
+        self._stop_timer()
+        
+        self._publish_event(TurnEventType.COMBAT_ENDED, {
+            'rounds': self.current_round,
+            'total_participants': len(self.participants)
+        })
+        
+        return True
+    
+    # ===== УПРАВЛЕНИЕ ХОДАМИ =====
+    
+    def _start_turn(self):
+        """Начинает ход текущего участника."""
+        if not self._is_combat:
+            return
+        
+        participant = self.get_current_participant()
+        if not participant:
+            self._next_turn()
+            return
+        
+        if not participant.is_active or participant.is_skipped:
+            self._next_turn()
+            return
+        
+        self._publish_event(TurnEventType.TURN_STARTED, {
+            'participant': participant.__dict__,
+            'round': self.current_round,
+            'turn_index': self.current_index
+        })
+        
+        # Запускаем таймер
+        if self.timer_seconds > 0:
+            self._start_timer()
+    
+    def _end_turn(self):
+        """Завершает ход текущего участника."""
+        participant = self.get_current_participant()
+        self._stop_timer()
+        
+        self._publish_event(TurnEventType.TURN_ENDED, {
+            'participant': participant.__dict__ if participant else None
+        })
+        
+        self._next_turn()
+    
+    def _next_turn(self):
+        """Переходит к следующему ходу."""
+        if not self._is_combat:
+            return
+        
+        self.current_index += 1
+        
+        # Проверяем, не кончился ли раунд
+        if self.current_index >= len(self.participants):
+            self.current_round += 1
+            self.current_index = 0
             
-            # Вычисляем позиции с физикой
-            positions = []
-            rotations = []
-            scales = []
-            opacities = []
+            # Обновляем активность участников
+            for p in self.participants:
+                p.is_skipped = False
             
-            for i in range(dice_count):
-                # Падение с ускорением
-                fall_progress = min(1, progress * 1.5)
-                if mode == DiceMode.CINEMATIC:
-                    fall_progress = min(1, progress * 1.2)
-                
-                # Синусоидальное движение для реалистичности
-                bounce = abs(math.sin(fall_progress * math.pi * 3)) * 30 * (1 - fall_progress)
-                
-                # Основная позиция
-                target_x = (i - (dice_count - 1) / 2) * 60 + random.uniform(-5, 5) * (1 - progress)
-                target_y = -math.cos(fall_progress * math.pi * 1.5) * 100 + 20 + bounce
-                
-                positions.append((target_x, target_y))
-                
-                # Вращение
-                rot = frame * (2 + i * 0.5) + random.uniform(-10, 10)
-                rotations.append(rot)
-                
-                # Масштаб
-                if mode == DiceMode.CINEMATIC and frame < total_frames * 0.3:
-                    scale = 0.1 + 0.9 * (progress / 0.3)  # Постепенное появление
-                else:
-                    scale = min(1, 0.3 + 0.7 * (1 - math.exp(-progress * 3)))
-                scales.append(min(1, scale))
-                
-                # Прозрачность
-                if mode == DiceMode.FAST:
-                    opacity = min(1, progress * 4)
-                else:
-                    opacity = min(1, progress * 3)
-                opacities.append(opacity)
-            
-            # Финальный кадр
-            is_final = (frame == total_frames - 1)
-            
-            frames.append(DiceAnimationFrame(
-                frame=frame,
-                dice_values=dice_values,
-                positions=positions,
-                rotations=rotations,
-                scales=scales,
-                opacities=opacities,
-                is_final=is_final,
-                total=result.final_total,
-                is_critical=result.is_critical,
-                is_fumble=result.is_fumble,
-                camera_x=0,
-                camera_y=0,
-                camera_zoom=config['camera_zoom']
-            ))
+            self._publish_event(TurnEventType.ROUND_ENDED, {'round': self.current_round - 1})
+            self._publish_event(TurnEventType.ROUND_STARTED, {'round': self.current_round})
         
-        # Финальный кадр с подсветкой результата
-        final_positions = []
-        final_rotations = []
-        for i in range(dice_count):
-            final_x = (i - (dice_count - 1) / 2) * 70
-            final_y = random.uniform(-5, 5)
-            final_positions.append((final_x, final_y))
-            final_rotations.append(random.choice([0, 90, 180, 270]))
+        # Проверяем, есть ли активные участники
+        active = [p for p in self.participants if p.is_active and not p.is_skipped]
+        if not active:
+            self.end_combat()
+            return
         
-        frames.append(DiceAnimationFrame(
-            frame=total_frames,
-            dice_values=dice_values,
-            positions=final_positions,
-            rotations=final_rotations,
-            scales=[1.0] * dice_count,
-            opacities=[1.0] * dice_count,
-            is_final=True,
-            total=result.final_total,
-            is_critical=result.is_critical,
-            is_fumble=result.is_fumble,
-            camera_x=0,
-            camera_y=0,
-            camera_zoom=config['camera_zoom'] * 1.2 if result.is_critical or result.is_fumble else config['camera_zoom']
-        ))
-        
-        return frames
+        # Начинаем новый ход
+        self._start_turn()
     
-    def generate_sound_events(self, mode: DiceMode, is_critical: bool = False, is_fumble: bool = False) -> List[dict]:
-        """Генерирует звуковые события для анимации."""
-        events = []
-        
-        if mode == DiceMode.FAST:
-            events.append({'time': 0.0, 'sound': 'dice_roll.wav', 'volume': 0.5})
-            events.append({'time': 0.5, 'sound': 'dice_land.wav', 'volume': 0.3})
-        elif mode == DiceMode.STANDARD:
-            events.append({'time': 0.0, 'sound': 'dice_roll.wav', 'volume': 0.7})
-            events.append({'time': 0.5, 'sound': 'dice_bounce.wav', 'volume': 0.4})
-            events.append({'time': 1.2, 'sound': 'dice_bounce.wav', 'volume': 0.3})
-            events.append({'time': 2.0, 'sound': 'dice_land.wav', 'volume': 0.5})
-        else:  # CINEMATIC
-            events.append({'time': 0.0, 'sound': 'dice_roll_cinematic.wav', 'volume': 0.8})
-            events.append({'time': 0.8, 'sound': 'dice_bounce.wav', 'volume': 0.5})
-            events.append({'time': 1.6, 'sound': 'dice_bounce.wav', 'volume': 0.4})
-            events.append({'time': 2.4, 'sound': 'dice_bounce.wav', 'volume': 0.3})
-            events.append({'time': 3.5, 'sound': 'dice_land_cinematic.wav', 'volume': 0.6})
-        
-        # Критические звуки
-        if is_critical:
-            events.append({'time': 3.8, 'sound': 'critical_success.wav', 'volume': 1.0})
-        if is_fumble:
-            events.append({'time': 3.8, 'sound': 'critical_failure.wav', 'volume': 1.0})
-        
-        return events
+    def next_turn(self) -> bool:
+        """Принудительно переходит к следующему ходу."""
+        if self.mode == TurnMode.FREE:
+            return False
+        self._end_turn()
+        return True
     
-    def get_animation_data(self, result: RollResult, mode: DiceMode) -> dict:
-        """Возвращает полные данные анимации."""
-        frames = self.generate_animation_frames(result, mode)
-        sounds = self.generate_sound_events(mode, result.is_critical, result.is_fumble)
+    def skip_participant(self, participant_id: str) -> bool:
+        """Пропускает ход участника."""
+        participant = self.get_participant(participant_id)
+        if not participant:
+            return False
         
+        participant.is_skipped = True
+        
+        self._publish_event(TurnEventType.PLAYER_SKIPPED, {
+            'participant': participant.__dict__
+        })
+        
+        # Если текущий участник пропущен, переходим к следующему
+        current = self.get_current_participant()
+        if current and current.id == participant_id:
+            self._end_turn()
+        
+        return True
+    
+    def move_participant(self, participant_id: str, new_position: int) -> bool:
+        """Перемещает участника в очереди."""
+        if new_position < 0 or new_position >= len(self.participants):
+            return False
+        
+        # Находим участника
+        current_index = -1
+        for i, p in enumerate(self.participants):
+            if p.id == participant_id:
+                current_index = i
+                break
+        
+        if current_index == -1:
+            return False
+        
+        # Перемещаем
+        participant = self.participants.pop(current_index)
+        self.participants.insert(new_position, participant)
+        
+        # Обновляем порядок
+        for i, p in enumerate(self.participants):
+            p.turn_order = i
+        
+        self._publish_event(TurnEventType.TURN_ORDER_CHANGED, {
+            'participants': [p.__dict__ for p in self.participants]
+        })
+        
+        return True
+    
+    # ===== ТАЙМЕР =====
+    
+    def set_timer(self, seconds: int):
+        """Устанавливает таймер хода."""
+        self.timer_seconds = seconds
+    
+    def _start_timer(self):
+        """Запускает таймер."""
+        if self.timer_seconds <= 0:
+            return
+        
+        self.timer_active = True
+        self._timer_task = asyncio.create_task(self._timer_loop())
+    
+    async def _timer_loop(self):
+        """Цикл таймера."""
+        remaining = self.timer_seconds
+        while remaining > 0 and self.timer_active:
+            await asyncio.sleep(1)
+            remaining -= 1
+            
+            # Отправляем обновление таймера
+            self._publish_event(TurnEventType.TIMER_EXPIRED, {
+                'remaining': remaining,
+                'participant': self.get_current_participant().__dict__ if self.get_current_participant() else None
+            })
+        
+        if self.timer_active:
+            self.timer_active = False
+            self._publish_event(TurnEventType.TIMER_EXPIRED, {
+                'remaining': 0,
+                'participant': self.get_current_participant().__dict__ if self.get_current_participant() else None
+            })
+            self._end_turn()
+    
+    def _stop_timer(self):
+        """Останавливает таймер."""
+        self.timer_active = False
+        if self._timer_task:
+            self._timer_task.cancel()
+            self._timer_task = None
+    
+    # ===== ГМ КОНТРОЛЬ =====
+    
+    def add_participant_mid_combat(self, participant: TurnParticipant) -> bool:
+        """Добавляет участника во время боя."""
+        if self.mode != TurnMode.INITIATIVE and self.mode != TurnMode.GM_CONTROLLED:
+            return False
+        
+        # Добавляем после текущего участника
+        insert_index = self.current_index + 1 if self.current_index >= 0 else 0
+        self.participants.insert(insert_index, participant)
+        for i, p in enumerate(self.participants):
+            p.turn_order = i
+        
+        self._publish_event(TurnEventType.PARTICIPANT_ADDED, {'participant': participant})
+        self._publish_event(TurnEventType.TURN_ORDER_CHANGED, {
+            'participants': [p.__dict__ for p in self.participants]
+        })
+        
+        return True
+    
+    def set_gm_order(self, participant_ids: List[str]) -> bool:
+        """Устанавливает порядок ходов вручную (GM)."""
+        new_participants = []
+        for pid in participant_ids:
+            for p in self.participants:
+                if p.id == pid:
+                    new_participants.append(p)
+                    break
+        
+        if len(new_participants) != len(self.participants):
+            return False
+        
+        self.participants = new_participants
+        for i, p in enumerate(self.participants):
+            p.turn_order = i
+        
+        self.mode = TurnMode.GM_CONTROLLED
+        
+        self._publish_event(TurnEventType.TURN_ORDER_CHANGED, {
+            'participants': [p.__dict__ for p in self.participants],
+            'mode': 'gm_controlled'
+        })
+        
+        return True
+    
+    # ===== СОБЫТИЯ =====
+    
+    def subscribe(self, event_type: TurnEventType, callback: Callable):
+        """Подписывается на события."""
+        if event_type not in self._event_listeners:
+            self._event_listeners[event_type] = []
+        self._event_listeners[event_type].append(callback)
+    
+    def _publish_event(self, event_type: TurnEventType, data: dict):
+        """Публикует событие."""
+        if event_type in self._event_listeners:
+            for callback in self._event_listeners[event_type]:
+                try:
+                    callback(event_type, data)
+                except Exception as e:
+                    print(f"Error in turn event callback: {e}")
+    
+    # ===== СОСТОЯНИЕ =====
+    
+    def get_state(self) -> dict:
+        """Возвращает текущее состояние очереди."""
+        current = self.get_current_participant()
         return {
-            'roll_id': result.roll_id,
-            'mode': mode.value,
-            'duration': self._MODES[mode]['duration'],
-            'frames': [f.__dict__ for f in frames],
-            'sounds': sounds,
-            'result': result.to_dict(),
-            'critical_type': 'critical_success' if result.is_critical else 'critical_failure' if result.is_fumble else None
+            'mode': self.mode.value,
+            'is_combat': self._is_combat,
+            'current_round': self.current_round,
+            'current_index': self.current_index,
+            'total_participants': len(self.participants),
+            'current_participant': current.__dict__ if current else None,
+            'participants': [p.__dict__ for p in self.participants],
+            'timer_seconds': self.timer_seconds,
+            'timer_active': self.timer_active
         }
 
-# Создаём глобальный экземпляр
-cinematic_dice = CinematicDiceSystem()
-
 # ============================================================
-# 4. DICE ENGINE (ОБНОВЛЁННЫЙ ДЛЯ CINEMATIC)
-# ============================================================
-
-@dataclass
-class RollRequest:
-    """Запрос на бросок кубиков."""
-    dice_type: str
-    count: int = 1
-    modifier: int = 0
-    reason: str = ''
-    visibility: DiceVisibility = DiceVisibility.PUBLIC
-    user_id: int = 0
-    character_id: int = 0
-    room_id: int = 0
-    advantage: bool = False
-    disadvantage: bool = False
-    mode: DiceMode = DiceMode.STANDARD
-    custom_modifiers: List[Dict] = field(default_factory=list)
-
-@dataclass
-class RollResult:
-    """Результат броска кубиков."""
-    dice_type: str
-    count: int
-    modifier: int
-    results: List[int]
-    total: int
-    final_total: int
-    is_critical: bool = False
-    is_fumble: bool = False
-    visibility: DiceVisibility = DiceVisibility.PUBLIC
-    reason: str = ''
-    user_id: int = 0
-    character_id: int = 0
-    room_id: int = 0
-    roll_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = field(default_factory=datetime.now)
-    mode: DiceMode = DiceMode.STANDARD
-
-class DiceEngine:
-    """Универсальная система бросков кубиков с поддержкой кинематографического режима."""
-    
-    _DICE_SIDES = {
-        'd2': 2, 'd4': 4, 'd6': 6, 'd8': 8,
-        'd10': 10, 'd12': 12, 'd20': 20, 'd100': 100
-    }
-    
-    def __init__(self):
-        self._history: List[RollResult] = []
-    
-    def roll(self, request: RollRequest) -> RollResult:
-        """Выполняет бросок кубиков."""
-        dice_type = request.dice_type.lower()
-        if dice_type not in self._DICE_SIDES:
-            raise ValueError(f"Неизвестный тип кубика: {dice_type}")
-        
-        max_value = self._DICE_SIDES[dice_type]
-        
-        results = []
-        if request.advantage or request.disadvantage:
-            if dice_type == 'd20' and request.count == 1:
-                roll1 = random.randint(1, max_value)
-                roll2 = random.randint(1, max_value)
-                if request.advantage:
-                    results = [max(roll1, roll2)]
-                else:
-                    results = [min(roll1, roll2)]
-            else:
-                results = [random.randint(1, max_value) for _ in range(request.count)]
-        else:
-            results = [random.randint(1, max_value) for _ in range(request.count)]
-        
-        total = sum(results)
-        final_total = total + request.modifier
-        
-        is_critical = False
-        is_fumble = False
-        if dice_type == 'd20' and request.count == 1:
-            roll = results[0] if results else 0
-            is_critical = roll == 20
-            is_fumble = roll == 1
-        
-        return RollResult(
-            dice_type=dice_type,
-            count=request.count,
-            modifier=request.modifier,
-            results=results,
-            total=total,
-            final_total=final_total,
-            is_critical=is_critical,
-            is_fumble=is_fumble,
-            visibility=request.visibility,
-            reason=request.reason,
-            user_id=request.user_id,
-            character_id=request.character_id,
-            room_id=request.room_id,
-            mode=request.mode
-        )
-    
-    def roll_formula(self, formula: str, **kwargs) -> RollResult:
-        """Выполняет бросок по формуле."""
-        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
-        if not match:
-            raise ValueError(f"Неверный формат формулы: {formula}")
-        
-        count = int(match.group(1) or 1)
-        dice_type = f"d{match.group(2)}"
-        extra_mod = int(match.group(3) or 0) if match.group(3) else 0
-        
-        request = RollRequest(
-            dice_type=dice_type,
-            count=count,
-            modifier=extra_mod + kwargs.get('modifier', 0),
-            reason=kwargs.get('reason', formula),
-            visibility=kwargs.get('visibility', DiceVisibility.PUBLIC),
-            user_id=kwargs.get('user_id', 0),
-            character_id=kwargs.get('character_id', 0),
-            room_id=kwargs.get('room_id', 0),
-            advantage=kwargs.get('advantage', False),
-            disadvantage=kwargs.get('disadvantage', False),
-            mode=kwargs.get('mode', DiceMode.STANDARD),
-            custom_modifiers=kwargs.get('custom_modifiers', [])
-        )
-        return self.roll(request)
-
-dice_engine = DiceEngine()
-
-# ============================================================
-# 5. МИГРАЦИЯ
+# 4. МИГРАЦИЯ
 # ============================================================
 
 def migrate_database():
@@ -589,10 +578,6 @@ def migrate_database():
             print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
-        if 'dice_history' not in inspector.get_table_names():
-            print("🔄 Создаём таблицу Dice History...")
-            Base.metadata.create_all(engine)
-            print("✅ Таблица истории бросков создана!")
     except Exception as e:
         print(f"⚠️ Ошибка миграции: {e}")
     finally:
@@ -602,7 +587,7 @@ Base.metadata.create_all(engine)
 migrate_database()
 
 # ============================================================
-# 6. FASTAPI
+# 5. FASTAPI
 # ============================================================
 
 app = FastAPI()
@@ -617,7 +602,7 @@ os.makedirs(MAP_DIR, exist_ok=True)
 connections = {}
 
 # ============================================================
-# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================
 
 def hash_password(password):
@@ -670,125 +655,278 @@ async def broadcast_to_room(room_id: int, message: dict):
             pass
 
 # ============================================================
-# 8. API: DICE ENGINE С КИНОШНЫМИ КУБИКАМИ
+# 7. TURN MANAGER MANAGER
 # ============================================================
 
-@app.post("/api/dice/roll")
-async def roll_dice(request: Request, data: dict):
+class TurnManagerManager:
+    """Управляет Turn Manager для всех комнат."""
+    
+    def __init__(self):
+        self._managers: Dict[int, TurnManager] = {}
+    
+    def get_manager(self, room_id: int) -> Optional[TurnManager]:
+        """Получает Turn Manager для комнаты."""
+        return self._managers.get(room_id)
+    
+    def create_manager(self, room_id: int) -> TurnManager:
+        """Создаёт Turn Manager для комнаты."""
+        manager = TurnManager(room_id)
+        self._managers[room_id] = manager
+        return manager
+    
+    def remove_manager(self, room_id: int):
+        """Удаляет Turn Manager комнаты."""
+        if room_id in self._managers:
+            manager = self._managers[room_id]
+            manager._stop_timer()
+            del self._managers[room_id]
+
+turn_manager_manager = TurnManagerManager()
+
+# ============================================================
+# 8. API: TURN MANAGER
+# ============================================================
+
+@app.post("/api/turn/initiative")
+async def start_initiative(request: Request, data: dict):
+    """Начинает инициативный режим (бой)."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    dice_type = data.get('dice_type', 'd20')
-    count = data.get('count', 1)
-    modifier = data.get('modifier', 0)
-    reason = data.get('reason', 'Бросок')
-    visibility = data.get('visibility', 'public')
     room_id_str = data.get('room_id')
-    character_id = data.get('character_id', 0)
-    advantage = data.get('advantage', False)
-    disadvantage = data.get('disadvantage', False)
-    mode_str = data.get('mode', 'standard')
-    
-    try:
-        mode = DiceMode(mode_str)
-    except ValueError:
-        mode = DiceMode.STANDARD
-    
-    try:
-        visibility_enum = DiceVisibility(visibility)
-    except ValueError:
-        visibility_enum = DiceVisibility.PUBLIC
-    
-    room_id = 0
-    if room_id_str:
-        session = Session()
-        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-        if room:
-            room_id = room.id
-            # Используем режим комнаты, если не указан конкретный
-            if not data.get('mode'):
-                mode = DiceMode(room.dice_mode)
-        session.close()
-    
-    roll_request = RollRequest(
-        dice_type=dice_type,
-        count=count,
-        modifier=modifier,
-        reason=reason,
-        visibility=visibility_enum,
-        user_id=user.id,
-        character_id=character_id,
-        room_id=room_id,
-        advantage=advantage,
-        disadvantage=disadvantage,
-        mode=mode
-    )
-    
-    result = dice_engine.roll(roll_request)
-    
-    # Сохраняем в БД
-    session = Session()
-    try:
-        history = DiceHistory(
-            room_id=result.room_id,
-            user_id=result.user_id,
-            character_id=result.character_id,
-            dice_type=result.dice_type,
-            count=result.count,
-            modifier=result.modifier,
-            formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
-            results=json.dumps(result.results),
-            total=result.total,
-            final_total=result.final_total,
-            is_critical=result.is_critical,
-            is_fumble=result.is_fumble,
-            visibility=result.visibility.value,
-            reason=result.reason,
-            timestamp=result.timestamp,
-            dice_mode=mode.value
-        )
-        session.add(history)
-        session.commit()
-    except Exception as e:
-        session.rollback()
-    finally:
-        session.close()
-    
-    # Генерируем кинематографическую анимацию
-    animation_data = cinematic_dice.get_animation_data(result, mode)
-    
-    # Отправляем всем в комнате
-    if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
-        await broadcast_to_room(room_id, {
-            'type': 'dice_roll_cinematic',
-            'result': result.to_dict(),
-            'animation': animation_data
-        })
-    
-    return {
-        'success': True,
-        'result': result.to_dict(),
-        'animation': animation_data
-    }
-
-@app.post("/api/dice/mode")
-async def set_dice_mode(request: Request, data: dict):
-    """Устанавливает режим кубиков для комнаты."""
-    user = get_current_user(request)
-    if not user or user.role != 'gm':
-        return {"success": False, "message": "Только GM может менять режим"}
-    
-    room_id_str = data.get('room_id')
-    mode_str = data.get('mode', 'standard')
+    participants_data = data.get('participants', [])
     
     if not room_id_str:
         return {"success": False, "message": "Не указан room_id"}
     
-    try:
-        mode = DiceMode(mode_str)
-    except ValueError:
-        return {"success": False, "message": f"Неизвестный режим: {mode_str}"}
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    if room.gm_id != user.id:
+        session.close()
+        return {"success": False, "message": "Только GM может начать бой"}
+    
+    # Создаём или получаем Turn Manager
+    manager = turn_manager_manager.get_manager(room.id)
+    if not manager:
+        manager = turn_manager_manager.create_manager(room.id)
+    
+    # Устанавливаем таймер из настроек комнаты
+    manager.set_timer(room.turn_timer)
+    
+    # Создаём участников
+    participants = []
+    for p_data in participants_data:
+        participant = TurnParticipant(
+            character_id=p_data.get('character_id', 0),
+            name=p_data.get('name', 'Участник'),
+            initiative=p_data.get('initiative', 0),
+            metadata=p_data.get('metadata', {})
+        )
+        participants.append(participant)
+    
+    if not participants:
+        session.close()
+        return {"success": False, "message": "Нет участников для боя"}
+    
+    # Запускаем инициативный режим
+    success = manager.start_initiative_mode(participants)
+    
+    if success:
+        # Обновляем состояние комнаты
+        room.state = RoomState.COMBAT
+        session.commit()
+        session.close()
+        
+        # Сохраняем участников в комнату
+        room.initiative_order = json.dumps([p.__dict__ for p in participants])
+        session.commit()
+        
+        await broadcast_to_room(room.id, {
+            'type': 'turn_initiative_started',
+            'state': manager.get_state()
+        })
+        
+        return {
+            'success': True,
+            'state': manager.get_state()
+        }
+    
+    session.close()
+    return {"success": False, "message": "Не удалось начать бой"}
+
+@app.post("/api/turn/next")
+async def next_turn(request: Request, data: dict):
+    """Переходит к следующему ходу."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id_str = data.get('room_id')
+    if not room_id_str:
+        return {"success": False, "message": "Не указан room_id"}
+    
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    manager = turn_manager_manager.get_manager(room.id)
+    if not manager:
+        session.close()
+        return {"success": False, "message": "Turn Manager не найден"}
+    
+    success = manager.next_turn()
+    session.close()
+    
+    if success:
+        await broadcast_to_room(room.id, {
+            'type': 'turn_updated',
+            'state': manager.get_state()
+        })
+        return {'success': True, 'state': manager.get_state()}
+    
+    return {"success": False, "message": "Не удалось перейти к следующему ходу"}
+
+@app.post("/api/turn/skip")
+async def skip_participant(request: Request, data: dict):
+    """Пропускает ход участника."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id_str = data.get('room_id')
+    participant_id = data.get('participant_id')
+    
+    if not room_id_str or not participant_id:
+        return {"success": False, "message": "Не указаны room_id или participant_id"}
+    
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    manager = turn_manager_manager.get_manager(room.id)
+    if not manager:
+        session.close()
+        return {"success": False, "message": "Turn Manager не найден"}
+    
+    success = manager.skip_participant(participant_id)
+    session.close()
+    
+    if success:
+        await broadcast_to_room(room.id, {
+            'type': 'turn_updated',
+            'state': manager.get_state()
+        })
+        return {'success': True, 'state': manager.get_state()}
+    
+    return {"success": False, "message": "Не удалось пропустить ход"}
+
+@app.post("/api/turn/move")
+async def move_participant(request: Request, data: dict):
+    """Перемещает участника в очереди."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id_str = data.get('room_id')
+    participant_id = data.get('participant_id')
+    new_position = data.get('new_position')
+    
+    if not room_id_str or not participant_id or new_position is None:
+        return {"success": False, "message": "Не указаны все параметры"}
+    
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    if room.gm_id != user.id:
+        session.close()
+        return {"success": False, "message": "Только GM может менять порядок"}
+    
+    manager = turn_manager_manager.get_manager(room.id)
+    if not manager:
+        session.close()
+        return {"success": False, "message": "Turn Manager не найден"}
+    
+    success = manager.move_participant(participant_id, new_position)
+    session.close()
+    
+    if success:
+        await broadcast_to_room(room.id, {
+            'type': 'turn_updated',
+            'state': manager.get_state()
+        })
+        return {'success': True, 'state': manager.get_state()}
+    
+    return {"success": False, "message": "Не удалось переместить участника"}
+
+@app.post("/api/turn/end_combat")
+async def end_combat(request: Request, data: dict):
+    """Завершает бой."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id_str = data.get('room_id')
+    if not room_id_str:
+        return {"success": False, "message": "Не указан room_id"}
+    
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    if room.gm_id != user.id:
+        session.close()
+        return {"success": False, "message": "Только GM может завершить бой"}
+    
+    manager = turn_manager_manager.get_manager(room.id)
+    if not manager:
+        session.close()
+        return {"success": False, "message": "Turn Manager не найден"}
+    
+    success = manager.end_combat()
+    
+    if success:
+        room.state = RoomState.EXPLORATION
+        session.commit()
+        session.close()
+        
+        await broadcast_to_room(room.id, {
+            'type': 'combat_ended',
+            'state': manager.get_state()
+        })
+        return {'success': True, 'state': manager.get_state()}
+    
+    session.close()
+    return {"success": False, "message": "Не удалось завершить бой"}
+
+@app.post("/api/turn/timer")
+async def set_turn_timer(request: Request, data: dict):
+    """Устанавливает таймер хода."""
+    user = get_current_user(request)
+    if not user or user.role != 'gm':
+        return {"success": False, "message": "Только GM может устанавливать таймер"}
+    
+    room_id_str = data.get('room_id')
+    seconds = data.get('seconds', 0)
+    
+    if not room_id_str:
+        return {"success": False, "message": "Не указан room_id"}
+    
+    if seconds < 0:
+        return {"success": False, "message": "Таймер не может быть отрицательным"}
     
     session = Session()
     try:
@@ -796,35 +934,44 @@ async def set_dice_mode(request: Request, data: dict):
         if not room:
             return {"success": False, "message": "Комната не найдена"}
         
-        room.dice_mode = mode.value
+        room.turn_timer = seconds
         session.commit()
         
+        manager = turn_manager_manager.get_manager(room.id)
+        if manager:
+            manager.set_timer(seconds)
+        
         await broadcast_to_room(room.id, {
-            'type': 'dice_mode_changed',
-            'mode': mode.value
+            'type': 'timer_updated',
+            'seconds': seconds
         })
         
-        return {'success': True, 'message': f'Режим кубиков изменён на {mode.value}'}
+        return {'success': True, 'message': f'Таймер установлен на {seconds} секунд'}
     except Exception as e:
         session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.get("/api/dice/modes")
-async def get_dice_modes():
-    """Возвращает все доступные режимы."""
-    return {
-        'success': True,
-        'modes': [
-            {'value': 'fast', 'label': 'Fast', 'description': 'Быстрый бросок (0.5-1.5 сек)'},
-            {'value': 'standard', 'label': 'Standard', 'description': 'Стандартный бросок (2-3 сек)'},
-            {'value': 'cinematic', 'label': 'Cinematic', 'description': 'Кинематографический бросок (3-5 сек)'}
-        ]
-    }
+@app.get("/api/turn/state/{room_id}")
+async def get_turn_state(room_id: str):
+    """Получает состояние очереди ходов."""
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id).first()
+    if not room:
+        session.close()
+        return {"success": False, "message": "Комната не найдена"}
+    
+    manager = turn_manager_manager.get_manager(room.id)
+    session.close()
+    
+    if not manager:
+        return {'success': True, 'state': {'mode': 'free', 'is_combat': False}}
+    
+    return {'success': True, 'state': manager.get_state()}
 
 # ============================================================
-# 9. СТРАНИЦЫ
+# 9. СТРАНИЦЫ (СОКРАЩЕНО)
 # ============================================================
 
 @app.get("/")
@@ -927,6 +1074,9 @@ async def room_page(request: Request, room_id: str):
     if room_player.character_id:
         character = session.query(Character).filter_by(id=room_player.character_id).first()
     
+    manager = turn_manager_manager.get_manager(room.id)
+    turn_state = manager.get_state() if manager else {'mode': 'free', 'is_combat': False}
+    
     session.close()
     
     return templates.TemplateResponse("room.html", {
@@ -935,7 +1085,7 @@ async def room_page(request: Request, room_id: str):
         "room": room,
         "character": character,
         "is_gm": room.gm_id == user.id,
-        "dice_mode": room.dice_mode
+        "turn_state": turn_state
     })
 
 # ============================================================
@@ -974,88 +1124,18 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                         'timestamp': datetime.now().isoformat()
                     })
                 
-                elif msg_type == 'dice_roll':
-                    # Обработка броска через WebSocket
-                    dice_type = msg.get('dice_type', 'd20')
-                    count = msg.get('count', 1)
-                    modifier = msg.get('modifier', 0)
-                    reason = msg.get('reason', 'Бросок')
-                    visibility = msg.get('visibility', 'public')
-                    character_id = msg.get('character_id', 0)
-                    advantage = msg.get('advantage', False)
-                    disadvantage = msg.get('disadvantage', False)
-                    mode_str = msg.get('mode', room.dice_mode)
-                    
-                    try:
-                        mode = DiceMode(mode_str)
-                    except ValueError:
-                        mode = DiceMode(room.dice_mode)
-                    
-                    try:
-                        visibility_enum = DiceVisibility(visibility)
-                    except ValueError:
-                        visibility_enum = DiceVisibility.PUBLIC
-                    
-                    roll_request = RollRequest(
-                        dice_type=dice_type,
-                        count=count,
-                        modifier=modifier,
-                        reason=reason,
-                        visibility=visibility_enum,
-                        user_id=msg.get('user_id', 0),
-                        character_id=character_id,
-                        room_id=room.id,
-                        advantage=advantage,
-                        disadvantage=disadvantage,
-                        mode=mode
-                    )
-                    
-                    result = dice_engine.roll(roll_request)
-                    
-                    # Сохраняем в БД
+                elif msg_type == 'turn_next':
                     session2 = Session()
-                    try:
-                        history = DiceHistory(
-                            room_id=result.room_id,
-                            user_id=result.user_id,
-                            character_id=result.character_id,
-                            dice_type=result.dice_type,
-                            count=result.count,
-                            modifier=result.modifier,
-                            formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
-                            results=json.dumps(result.results),
-                            total=result.total,
-                            final_total=result.final_total,
-                            is_critical=result.is_critical,
-                            is_fumble=result.is_fumble,
-                            visibility=result.visibility.value,
-                            reason=result.reason,
-                            timestamp=result.timestamp,
-                            dice_mode=mode.value
-                        )
-                        session2.add(history)
-                        session2.commit()
-                    except Exception as e:
-                        session2.rollback()
-                    finally:
-                        session2.close()
-                    
-                    animation_data = cinematic_dice.get_animation_data(result, mode)
-                    
-                    if visibility_enum == DiceVisibility.PUBLIC:
-                        await broadcast_to_room(room.id, {
-                            'type': 'dice_roll_cinematic',
-                            'result': result.to_dict(),
-                            'animation': animation_data
-                        })
-                    else:
-                        gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
-                        if gm:
-                            await websocket.send_text(json.dumps({
-                                'type': 'dice_roll_secret',
-                                'result': result.to_dict(),
-                                'animation': animation_data
-                            }))
+                    room2 = session2.query(GameRoom).filter_by(room_id=room_id).first()
+                    if room2:
+                        manager = turn_manager_manager.get_manager(room2.id)
+                        if manager:
+                            manager.next_turn()
+                            await broadcast_to_room(room2.id, {
+                                'type': 'turn_updated',
+                                'state': manager.get_state()
+                            })
+                    session2.close()
                 
             except json.JSONDecodeError:
                 pass
