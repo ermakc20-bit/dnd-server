@@ -13,6 +13,7 @@ import uuid
 import random
 import math
 import re
+import asyncio
 from typing import Dict, Optional, List, Any, Set, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -33,42 +34,27 @@ class RoomState(str, Enum):
     PAUSED = "paused"
     FINISHED = "finished"
 
-class ActionCategory(str, Enum):
-    MOVE = "move"
-    ATTACK = "attack"
-    USE_SKILL = "use_skill"
-    USE_ITEM = "use_item"
-    TALK = "talk"
-    INTERACT = "interact"
-    OPEN_DOOR = "open_door"
-    READ = "read"
-    CHECK = "check"
-    CAST_SPELL = "cast_spell"
-    DIALOGUE = "dialogue"
-    COMBAT_ACTION = "combat_action"
-    ADMIN = "admin"
+class DiceType(str, Enum):
+    D2 = "d2"
+    D4 = "d4"
+    D6 = "d6"
+    D8 = "d8"
+    D10 = "d10"
+    D12 = "d12"
+    D20 = "d20"
+    D100 = "d100"
 
-class CombatEntityType(str, Enum):
-    PLAYER = "player"
-    NPC = "npc"
-    MONSTER = "monster"
-    SUMMON = "summon"
-    TEMPORARY = "temporary"
+class DiceVisibility(str, Enum):
+    PUBLIC = "public"
+    SECRET = "secret"
 
-class CombatEventType(str, Enum):
-    COMBAT_STARTED = "combat_started"
-    COMBAT_ENDED = "combat_ended"
-    ROUND_STARTED = "round_started"
-    ROUND_ENDED = "round_ended"
-    TURN_STARTED = "turn_started"
-    TURN_ENDED = "turn_ended"
-    ENTITY_KILLED = "entity_killed"
-    ENTITY_REVIVED = "entity_revived"
-    ACTION_PERFORMED = "action_performed"
-    DAMAGE_DEALT = "damage_dealt"
-    HEAL_APPLIED = "heal_applied"
-    EFFECT_APPLIED = "effect_applied"
-    EFFECT_REMOVED = "effect_removed"
+class DiceEventType(str, Enum):
+    ROLL_STARTED = "roll_started"
+    ANIMATION_STARTED = "animation_started"
+    ANIMATION_FINISHED = "animation_finished"
+    ROLL_COMPLETED = "roll_completed"
+    CRITICAL_SUCCESS = "critical_success"
+    CRITICAL_FAILURE = "critical_failure"
 
 # ============================================================
 # 2. БАЗА ДАННЫХ
@@ -119,24 +105,28 @@ class Character(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
 
-class CustomSkill(Base):
-    __tablename__ = 'custom_skills'
+class DiceHistory(Base):
+    """История бросков кубиков."""
+    __tablename__ = 'dice_history'
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    icon = Column(String(255), default='')
-    description = Column(Text, default='')
-    dice_formula = Column(String(50), default='1d20')
-    damage_formula = Column(String(50), default='')
-    saving_throw = Column(String(50), default='')
-    target_type = Column(String(50), default='single')
-    cost_type = Column(String(50), default='action')
-    cost_value = Column(Integer, default=1)
-    cooldown = Column(Integer, default=0)
-    effects = Column(JSON, default='[]')
-    animation = Column(String(100), default='')
-    created_by = Column(Integer, ForeignKey('users.id'))
     room_id = Column(Integer, ForeignKey('game_rooms.id'))
-    created_at = Column(DateTime, default=datetime.now)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    character_id = Column(Integer, ForeignKey('characters.id'), nullable=True)
+    dice_type = Column(String(10))
+    count = Column(Integer, default=1)
+    modifier = Column(Integer, default=0)
+    formula = Column(String(100))
+    results = Column(JSON, default='[]')
+    total = Column(Integer, default=0)
+    final_total = Column(Integer, default=0)
+    is_critical = Column(Boolean, default=False)
+    is_fumble = Column(Boolean, default=False)
+    visibility = Column(String(20), default='public')
+    reason = Column(String(200), default='')
+    timestamp = Column(DateTime, default=datetime.now)
+    
+    user = relationship("User", foreign_keys=[user_id])
+    character = relationship("Character", foreign_keys=[character_id])
 
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
@@ -162,9 +152,8 @@ class GameRoom(Base):
     gm = relationship("User", foreign_keys=[gm_id])
     tokens = relationship("GameToken", backref="room", cascade="all, delete-orphan")
     players = relationship("RoomPlayer", backref="room", cascade="all, delete-orphan")
-    custom_skills = relationship("CustomSkill", backref="room", cascade="all, delete-orphan")
     characters = relationship("Character", backref="room", cascade="all, delete-orphan")
-    action_logs = relationship("ActionLog", backref="room", cascade="all, delete-orphan")
+    dice_history = relationship("DiceHistory", backref="room", cascade="all, delete-orphan")
 
 class RoomPlayer(Base):
     __tablename__ = 'room_players'
@@ -212,450 +201,282 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. COMBAT ENGINE (ЯДРО БОЕВОЙ СИСТЕМЫ)
+# 3. DICE ENGINE
 # ============================================================
 
 @dataclass
-class CombatEntity:
-    """Участник боя."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+class RollRequest:
+    """Запрос на бросок кубиков."""
+    dice_type: str  # d4, d6, d8, d10, d12, d20, d100
+    count: int = 1
+    modifier: int = 0
+    reason: str = ''
+    visibility: DiceVisibility = DiceVisibility.PUBLIC
+    user_id: int = 0
     character_id: int = 0
-    name: str = ''
-    entity_type: CombatEntityType = CombatEntityType.NPC
-    initiative: int = 0
-    current_hp: int = 20
-    max_hp: int = 20
-    temporary_hp: int = 0
-    armor_class: int = 10
-    is_alive: bool = True
-    can_act: bool = True
-    x: float = 0
-    y: float = 0
-    token_id: int = 0
+    room_id: int = 0
     
     def to_dict(self) -> dict:
         return {
-            'id': self.id,
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'modifier': self.modifier,
+            'reason': self.reason,
+            'visibility': self.visibility.value,
+            'user_id': self.user_id,
             'character_id': self.character_id,
-            'name': self.name,
-            'entity_type': self.entity_type.value,
-            'initiative': self.initiative,
-            'current_hp': self.current_hp,
-            'max_hp': self.max_hp,
-            'temporary_hp': self.temporary_hp,
-            'armor_class': self.armor_class,
-            'is_alive': self.is_alive,
-            'can_act': self.can_act,
-            'x': self.x,
-            'y': self.y,
-            'token_id': self.token_id
+            'room_id': self.room_id
         }
 
 @dataclass
-class CombatLogEntry:
-    """Запись в боевом журнале."""
+class RollResult:
+    """Результат броска кубиков."""
+    dice_type: str
+    count: int
+    modifier: int
+    results: List[int]
+    total: int
+    final_total: int
+    is_critical: bool = False
+    is_fumble: bool = False
+    visibility: DiceVisibility = DiceVisibility.PUBLIC
+    reason: str = ''
+    user_id: int = 0
+    character_id: int = 0
+    room_id: int = 0
+    roll_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
-    event_type: CombatEventType = CombatEventType.ACTION_PERFORMED
-    actor_id: str = ''
-    actor_name: str = ''
-    target_id: str = ''
-    target_name: str = ''
-    message: str = ''
-    data: Dict = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return {
-            'timestamp': self.timestamp.isoformat(),
-            'event_type': self.event_type.value,
-            'actor_id': self.actor_id,
-            'actor_name': self.actor_name,
-            'target_id': self.target_id,
-            'target_name': self.target_name,
-            'message': self.message,
-            'data': self.data
+            'roll_id': self.roll_id,
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'modifier': self.modifier,
+            'results': self.results,
+            'total': self.total,
+            'final_total': self.final_total,
+            'is_critical': self.is_critical,
+            'is_fumble': self.is_fumble,
+            'visibility': self.visibility.value,
+            'reason': self.reason,
+            'user_id': self.user_id,
+            'character_id': self.character_id,
+            'room_id': self.room_id,
+            'timestamp': self.timestamp.isoformat()
+        }
+    
+    def get_animation_data(self) -> dict:
+        """Возвращает данные для анимации кубиков."""
+        return {
+            'roll_id': self.roll_id,
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'results': self.results,
+            'total': self.total,
+            'final_total': self.final_total,
+            'is_critical': self.is_critical,
+            'is_fumble': self.is_fumble,
+            'color': '#ffd700' if self.is_critical else '#ff4444' if self.is_fumble else '#ffffff'
         }
 
-class CombatEngine:
+class DiceEngine:
     """
-    Универсальный боевой движок.
+    Универсальная система бросков кубиков.
     Не знает про D&D, Vampire или другие системы.
-    Только координирует порядок боя.
+    Только кубики.
     """
     
-    def __init__(self, room_id: int):
-        self.room_id = room_id
-        self.is_active = False
-        self.entities: Dict[str, CombatEntity] = {}
-        self.queue: List[str] = []  # entity_ids в порядке инициативы
-        self.current_index: int = 0
-        self.round_number: int = 0
-        self.logs: List[CombatLogEntry] = []
-        self._event_listeners: Dict[CombatEventType, List[Callable]] = {}
-        self._action_resolver = None  # Будет установлен позже
+    # Доступные типы кубиков и их максимальные значения
+    _DICE_SIDES = {
+        'd2': 2,
+        'd4': 4,
+        'd6': 6,
+        'd8': 8,
+        'd10': 10,
+        'd12': 12,
+        'd20': 20,
+        'd100': 100
+    }
     
-    # ===== УПРАВЛЕНИЕ УЧАСТНИКАМИ =====
+    def __init__(self):
+        self._event_listeners: Dict[DiceEventType, List[Callable]] = {}
+        self._history: List[RollResult] = []
     
-    def add_entity(self, entity: CombatEntity) -> bool:
-        """Добавляет участника в бой."""
-        if entity.id in self.entities:
-            return False
-        self.entities[entity.id] = entity
-        self.queue.append(entity.id)
-        return True
+    # ===== ОСНОВНЫЕ МЕТОДЫ БРОСКОВ =====
     
-    def remove_entity(self, entity_id: str) -> bool:
-        """Удаляет участника из боя."""
-        if entity_id not in self.entities:
-            return False
-        del self.entities[entity_id]
-        if entity_id in self.queue:
-            self.queue.remove(entity_id)
-        return True
-    
-    def get_entity(self, entity_id: str) -> Optional[CombatEntity]:
-        """Получает участника по ID."""
-        return self.entities.get(entity_id)
-    
-    def get_living_entities(self) -> List[CombatEntity]:
-        """Возвращает живых участников."""
-        return [e for e in self.entities.values() if e.is_alive]
-    
-    # ===== УПРАВЛЕНИЕ БОЕМ =====
-    
-    def start_combat(self, entities: List[CombatEntity]) -> bool:
-        """Начинает бой с указанными участниками."""
-        if self.is_active:
-            return False
-        
-        self.is_active = True
-        self.entities = {e.id: e for e in entities}
-        self.queue = [e.id for e in entities]
-        self.round_number = 0
-        self.current_index = 0
-        self.logs = []
-        
-        # Сортируем по инициативе (по убыванию)
-        self.queue.sort(key=lambda eid: self.entities[eid].initiative, reverse=True)
-        
-        # Начинаем первый раунд
-        self._start_round()
-        
-        self._publish_event(CombatEventType.COMBAT_STARTED, {
-            'entities': [e.to_dict() for e in entities]
-        })
-        
-        return True
-    
-    def end_combat(self) -> bool:
-        """Завершает бой."""
-        if not self.is_active:
-            return False
-        
-        self.is_active = False
-        self._publish_event(CombatEventType.COMBAT_ENDED, {
-            'rounds': self.round_number,
-            'log_count': len(self.logs)
-        })
-        return True
-    
-    # ===== УПРАВЛЕНИЕ РАУНДАМИ =====
-    
-    def _start_round(self):
-        """Начинает новый раунд."""
-        self.round_number += 1
-        self.current_index = 0
-        
-        # Обновляем живых участников
-        living = self.get_living_entities()
-        if not living:
-            self.end_combat()
-            return
-        
-        # Сортируем по инициативе
-        self.queue = [e.id for e in sorted(living, key=lambda e: e.initiative, reverse=True)]
-        
-        self._publish_event(CombatEventType.ROUND_STARTED, {
-            'round_number': self.round_number
-        })
-        
-        # Начинаем первый ход
-        self._start_turn()
-    
-    def _end_round(self):
-        """Завершает текущий раунд."""
-        self._publish_event(CombatEventType.ROUND_ENDED, {
-            'round_number': self.round_number
-        })
-        self._start_round()
-    
-    # ===== УПРАВЛЕНИЕ ХОДАМИ =====
-    
-    def _start_turn(self):
-        """Начинает ход текущего участника."""
-        if not self.is_active:
-            return
-        
-        # Проверяем, есть ли живые участники
-        living = self.get_living_entities()
-        if not living:
-            self.end_combat()
-            return
-        
-        # Проверяем, не вышел ли индекс за пределы
-        if self.current_index >= len(self.queue):
-            self._end_round()
-            return
-        
-        entity_id = self.queue[self.current_index]
-        entity = self.entities.get(entity_id)
-        
-        if not entity or not entity.is_alive:
-            self._next_turn()
-            return
-        
-        # Применяем эффекты в начале хода
-        self._apply_turn_start_effects(entity)
-        
-        self._publish_event(CombatEventType.TURN_STARTED, {
-            'entity': entity.to_dict(),
-            'round': self.round_number,
-            'turn_index': self.current_index
-        })
-    
-    def _end_turn(self):
-        """Завершает ход текущего участника."""
-        entity_id = self.queue[self.current_index] if self.current_index < len(self.queue) else None
-        entity = self.entities.get(entity_id) if entity_id else None
-        
-        self._publish_event(CombatEventType.TURN_ENDED, {
-            'entity_id': entity_id,
-            'entity_name': entity.name if entity else 'Unknown'
-        })
-        
-        self._next_turn()
-    
-    def _next_turn(self):
-        """Переходит к следующему ходу."""
-        self.current_index += 1
-        
-        # Проверяем, не кончился ли раунд
-        if self.current_index >= len(self.queue):
-            self._end_round()
-        else:
-            self._start_turn()
-    
-    # ===== ПРИМЕНЕНИЕ ЭФФЕКТОВ В НАЧАЛЕ ХОДА =====
-    
-    def _apply_turn_start_effects(self, entity: CombatEntity):
-        """Применяет эффекты в начале хода (Bleeding, Poison, Regeneration и т.д.)."""
-        # Здесь будет вызов Effect System
-        # TODO: Интеграция с Effect System
-        pass
-    
-    # ===== ДЕЙСТВИЯ В БОЮ =====
-    
-    def perform_action(self, entity_id: str, action_data: Dict) -> Dict:
+    def roll(self, request: RollRequest) -> RollResult:
         """
-        Выполняет действие в бою.
-        Вызывает Action Resolver для расчёта.
+        Выполняет бросок кубиков.
+        Единственный метод для всех бросков.
         """
-        if not self.is_active:
-            return {'success': False, 'error': 'Бой не активен'}
+        # Проверяем валидность dice_type
+        dice_type = request.dice_type.lower()
+        if dice_type not in self._DICE_SIDES:
+            raise ValueError(f"Неизвестный тип кубика: {dice_type}")
         
-        entity = self.entities.get(entity_id)
-        if not entity:
-            return {'success': False, 'error': 'Участник не найден'}
+        max_value = self._DICE_SIDES[dice_type]
+        results = [random.randint(1, max_value) for _ in range(request.count)]
+        total = sum(results)
+        final_total = total + request.modifier
         
-        if not entity.is_alive:
-            return {'success': False, 'error': 'Участник мёртв'}
+        # Определяем критические результаты (только для d20)
+        is_critical = False
+        is_fumble = False
+        if dice_type == 'd20' and request.count == 1:
+            is_critical = results[0] == 20
+            is_fumble = results[0] == 1
         
-        # Проверяем, что это ход этого участника
-        current_id = self.queue[self.current_index] if self.current_index < len(self.queue) else None
-        if current_id != entity_id:
-            return {'success': False, 'error': 'Сейчас не ваш ход'}
+        result = RollResult(
+            dice_type=dice_type,
+            count=request.count,
+            modifier=request.modifier,
+            results=results,
+            total=total,
+            final_total=final_total,
+            is_critical=is_critical,
+            is_fumble=is_fumble,
+            visibility=request.visibility,
+            reason=request.reason,
+            user_id=request.user_id,
+            character_id=request.character_id,
+            room_id=request.room_id
+        )
         
-        # Вызываем Action Resolver (если установлен)
-        if self._action_resolver:
-            result = self._action_resolver.resolve_action(entity_id, action_data)
-        else:
-            result = {'success': True, 'message': 'Действие выполнено', 'data': action_data}
+        # Публикуем события
+        self._publish_event(DiceEventType.ROLL_STARTED, result)
         
-        # Публикуем событие
-        self._publish_event(CombatEventType.ACTION_PERFORMED, {
-            'entity_id': entity_id,
-            'entity_name': entity.name,
-            'action': action_data,
-            'result': result
-        })
+        if is_critical:
+            self._publish_event(DiceEventType.CRITICAL_SUCCESS, result)
+        elif is_fumble:
+            self._publish_event(DiceEventType.CRITICAL_FAILURE, result)
         
-        # Добавляем в лог
-        self.logs.append(CombatLogEntry(
-            event_type=CombatEventType.ACTION_PERFORMED,
-            actor_id=entity_id,
-            actor_name=entity.name,
-            message=result.get('message', 'Действие выполнено'),
-            data={'action': action_data, 'result': result}
-        ))
+        # Сохраняем в историю
+        self._history.append(result)
         
-        # Завершаем ход
-        self._end_turn()
+        # Публикуем завершение
+        self._publish_event(DiceEventType.ROLL_COMPLETED, result)
         
         return result
     
-    def skip_turn(self, entity_id: str) -> bool:
-        """Пропускает ход."""
-        if not self.is_active:
-            return False
+    def roll_formula(self, formula: str, modifier: int = 0, **kwargs) -> RollResult:
+        """
+        Выполняет бросок по формуле (например: '2d6+4').
+        """
+        # Парсим формулу
+        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
+        if not match:
+            raise ValueError(f"Неверный формат формулы: {formula}")
         
-        entity = self.entities.get(entity_id)
-        if not entity or not entity.is_alive:
-            return False
+        count = int(match.group(1) or 1)
+        dice_type = f"d{match.group(2)}"
+        extra_mod = int(match.group(3) or 0) if match.group(3) else 0
         
-        current_id = self.queue[self.current_index] if self.current_index < len(self.queue) else None
-        if current_id != entity_id:
-            return False
+        request = RollRequest(
+            dice_type=dice_type,
+            count=count,
+            modifier=modifier + extra_mod,
+            reason=kwargs.get('reason', formula),
+            visibility=kwargs.get('visibility', DiceVisibility.PUBLIC),
+            user_id=kwargs.get('user_id', 0),
+            character_id=kwargs.get('character_id', 0),
+            room_id=kwargs.get('room_id', 0)
+        )
         
-        self._publish_event(CombatEventType.ACTION_PERFORMED, {
-            'entity_id': entity_id,
-            'entity_name': entity.name,
-            'action': 'skip',
-            'result': {'success': True, 'message': 'Ход пропущен'}
-        })
-        
-        self.logs.append(CombatLogEntry(
-            event_type=CombatEventType.ACTION_PERFORMED,
-            actor_id=entity_id,
-            actor_name=entity.name,
-            message='Ход пропущен'
-        ))
-        
-        self._end_turn()
-        return True
+        return self.roll(request)
     
-    # ===== УПРАВЛЕНИЕ HP =====
+    # ===== ПАРСИНГ ФОРМУЛ =====
     
-    def apply_damage(self, target_id: str, damage: int, source_id: str = None) -> int:
-        """Применяет урон к цели. Возвращает реальный урон."""
-        entity = self.entities.get(target_id)
-        if not entity or not entity.is_alive:
-            return 0
+    def parse_formula(self, formula: str) -> dict:
+        """
+        Разбирает формулу на составляющие.
+        Возвращает: {'count': int, 'dice_type': str, 'modifier': int}
+        """
+        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
+        if not match:
+            raise ValueError(f"Неверный формат формулы: {formula}")
         
-        # Сначала снимаем временные HP
-        if entity.temporary_hp > 0:
-            temp_damage = min(damage, entity.temporary_hp)
-            entity.temporary_hp -= temp_damage
-            damage -= temp_damage
-            if entity.temporary_hp < 0:
-                entity.temporary_hp = 0
-        
-        # Снимаем основные HP
-        actual_damage = min(damage, entity.current_hp)
-        entity.current_hp -= actual_damage
-        
-        # Проверяем смерть
-        if entity.current_hp <= 0:
-            entity.current_hp = 0
-            entity.is_alive = False
-            self._publish_event(CombatEventType.ENTITY_KILLED, {
-                'entity_id': target_id,
-                'entity_name': entity.name,
-                'source_id': source_id
-            })
-        
-        # Публикуем событие
-        self._publish_event(CombatEventType.DAMAGE_DEALT, {
-            'target_id': target_id,
-            'target_name': entity.name,
-            'damage': actual_damage,
-            'source_id': source_id
-        })
-        
-        self.logs.append(CombatLogEntry(
-            event_type=CombatEventType.DAMAGE_DEALT,
-            actor_id=source_id or 'unknown',
-            actor_name='Unknown',
-            target_id=target_id,
-            target_name=entity.name,
-            message=f'{entity.name} получил {actual_damage} урона',
-            data={'damage': actual_damage, 'remaining_hp': entity.current_hp}
-        ))
-        
-        return actual_damage
+        return {
+            'count': int(match.group(1) or 1),
+            'dice_type': f"d{match.group(2)}",
+            'modifier': int(match.group(3) or 0) if match.group(3) else 0
+        }
     
-    def apply_heal(self, target_id: str, amount: int, source_id: str = None) -> int:
-        """Применяет лечение к цели. Возвращает реальное лечение."""
-        entity = self.entities.get(target_id)
-        if not entity or not entity.is_alive:
-            return 0
-        
-        old_hp = entity.current_hp
-        entity.current_hp = min(entity.max_hp, entity.current_hp + amount)
-        actual_heal = entity.current_hp - old_hp
-        
-        if entity.current_hp > 0 and not entity.is_alive:
-            entity.is_alive = True
-            self._publish_event(CombatEventType.ENTITY_REVIVED, {
-                'entity_id': target_id,
-                'entity_name': entity.name,
-                'source_id': source_id
-            })
-        
-        self._publish_event(CombatEventType.HEAL_APPLIED, {
-            'target_id': target_id,
-            'target_name': entity.name,
-            'heal': actual_heal,
-            'source_id': source_id
-        })
-        
-        self.logs.append(CombatLogEntry(
-            event_type=CombatEventType.HEAL_APPLIED,
-            actor_id=source_id or 'unknown',
-            actor_name='Unknown',
-            target_id=target_id,
-            target_name=entity.name,
-            message=f'{entity.name} получил {actual_heal} лечения',
-            data={'heal': actual_heal, 'remaining_hp': entity.current_hp}
-        ))
-        
-        return actual_heal
+    # ===== ВИЗУАЛИЗАЦИЯ =====
+    
+    def get_animation_data(self, result: RollResult) -> dict:
+        """Возвращает данные для анимации кубиков."""
+        return result.get_animation_data()
+    
+    # ===== ИСТОРИЯ =====
+    
+    def get_history(self, limit: int = 50, room_id: int = None) -> List[RollResult]:
+        """Возвращает историю бросков."""
+        history = self._history
+        if room_id:
+            history = [r for r in history if r.room_id == room_id]
+        return history[-limit:]
+    
+    def save_history_to_db(self, result: RollResult) -> bool:
+        """Сохраняет результат броска в базу данных."""
+        session = Session()
+        try:
+            history_entry = DiceHistory(
+                room_id=result.room_id,
+                user_id=result.user_id,
+                character_id=result.character_id,
+                dice_type=result.dice_type,
+                count=result.count,
+                modifier=result.modifier,
+                formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
+                results=json.dumps(result.results),
+                total=result.total,
+                final_total=result.final_total,
+                is_critical=result.is_critical,
+                is_fumble=result.is_fumble,
+                visibility=result.visibility.value,
+                reason=result.reason,
+                timestamp=result.timestamp
+            )
+            session.add(history_entry)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print(f"Error saving dice history: {e}")
+            return False
+        finally:
+            session.close()
     
     # ===== СОБЫТИЯ =====
     
-    def subscribe(self, event_type: CombatEventType, callback: Callable):
-        """Подписывается на события боя."""
+    def subscribe(self, event_type: DiceEventType, callback: Callable):
+        """Подписывается на события бросков."""
         if event_type not in self._event_listeners:
             self._event_listeners[event_type] = []
         self._event_listeners[event_type].append(callback)
     
-    def _publish_event(self, event_type: CombatEventType, data: Dict):
+    def _publish_event(self, event_type: DiceEventType, data: RollResult):
         """Публикует событие."""
         if event_type in self._event_listeners:
             for callback in self._event_listeners[event_type]:
                 try:
                     callback(event_type, data)
                 except Exception as e:
-                    print(f"Error in event callback: {e}")
-    
-    # ===== СОСТОЯНИЕ БОЯ =====
-    
-    def get_state(self) -> Dict:
-        """Возвращает текущее состояние боя."""
-        return {
-            'is_active': self.is_active,
-            'round_number': self.round_number,
-            'current_index': self.current_index,
-            'total_entities': len(self.entities),
-            'living_entities': len(self.get_living_entities()),
-            'queue': [self.entities[eid].to_dict() for eid in self.queue if eid in self.entities],
-            'current_entity_id': self.queue[self.current_index] if self.current_index < len(self.queue) and self.is_active else None,
-            'logs': [log.to_dict() for log in self.logs[-20:]]  # Последние 20 записей
-        }
+                    print(f"Error in dice event callback: {e}")
     
     # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
     
-    def set_action_resolver(self, resolver):
-        """Устанавливает Action Resolver для расчёта действий."""
-        self._action_resolver = resolver
+    def get_supported_dice(self) -> List[str]:
+        """Возвращает список поддерживаемых типов кубиков."""
+        return list(self._DICE_SIDES.keys())
+    
+    def get_max_value(self, dice_type: str) -> int:
+        """Возвращает максимальное значение для типа кубика."""
+        return self._DICE_SIDES.get(dice_type.lower(), 0)
+
+# Создаём глобальный экземпляр Dice Engine
+dice_engine = DiceEngine()
 
 # ============================================================
 # 4. МИГРАЦИЯ
@@ -670,10 +491,10 @@ def migrate_database():
             print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
-        if 'custom_skills' not in inspector.get_table_names():
-            print("🔄 Создаём таблицу Custom Skills...")
+        if 'dice_history' not in inspector.get_table_names():
+            print("🔄 Создаём таблицу Dice History...")
             Base.metadata.create_all(engine)
-            print("✅ Таблица навыков создана!")
+            print("✅ Таблица истории бросков создана!")
         if 'action_logs' not in inspector.get_table_names():
             print("🔄 Создаём таблицу Action Logs...")
             Base.metadata.create_all(engine)
@@ -748,253 +569,193 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 7. COMBAT MANAGER
+# 7. API: DICE ENGINE
 # ============================================================
 
-class CombatManager:
-    """Управляет боевыми движками для всех комнат."""
-    
-    def __init__(self):
-        self._engines: Dict[int, CombatEngine] = {}
-    
-    def get_engine(self, room_id: int) -> Optional[CombatEngine]:
-        """Получает боевой движок для комнаты."""
-        return self._engines.get(room_id)
-    
-    def create_engine(self, room_id: int) -> CombatEngine:
-        """Создаёт боевой движок для комнаты."""
-        engine = CombatEngine(room_id)
-        self._engines[room_id] = engine
-        return engine
-    
-    def remove_engine(self, room_id: int):
-        """Удаляет боевой движок комнаты."""
-        if room_id in self._engines:
-            del self._engines[room_id]
-    
-    def start_combat(self, room_id: int, entities: List[CombatEntity]) -> bool:
-        """Начинает бой в комнате."""
-        engine = self.get_engine(room_id)
-        if not engine:
-            engine = self.create_engine(room_id)
-        return engine.start_combat(entities)
-    
-    def end_combat(self, room_id: int) -> bool:
-        """Завершает бой в комнате."""
-        engine = self.get_engine(room_id)
-        if not engine:
-            return False
-        return engine.end_combat()
-
-combat_manager = CombatManager()
-
-# ============================================================
-# 8. API: COMBAT
-# ============================================================
-
-@app.post("/api/combat/start")
-async def start_combat(request: Request, data: dict):
-    """Начинает бой в комнате."""
+@app.post("/api/dice/roll")
+async def roll_dice(request: Request, data: dict):
+    """Выполняет бросок кубиков."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
+    dice_type = data.get('dice_type', 'd20')
+    count = data.get('count', 1)
+    modifier = data.get('modifier', 0)
+    reason = data.get('reason', 'Бросок')
+    visibility = data.get('visibility', 'public')
     room_id_str = data.get('room_id')
-    if not room_id_str:
-        return {"success": False, "message": "Не указан room_id"}
+    character_id = data.get('character_id', 0)
     
-    session = Session()
-    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-    if not room:
+    try:
+        visibility_enum = DiceVisibility(visibility)
+    except ValueError:
+        visibility_enum = DiceVisibility.PUBLIC
+    
+    # Получаем комнату
+    room_id = 0
+    if room_id_str:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+        if room:
+            room_id = room.id
         session.close()
-        return {"success": False, "message": "Комната не найдена"}
     
-    if room.gm_id != user.id:
-        session.close()
-        return {"success": False, "message": "Только GM может начать бой"}
+    # Создаём запрос
+    roll_request = RollRequest(
+        dice_type=dice_type,
+        count=count,
+        modifier=modifier,
+        reason=reason,
+        visibility=visibility_enum,
+        user_id=user.id,
+        character_id=character_id,
+        room_id=room_id
+    )
     
-    # Получаем участников
-    entities_data = data.get('entities', [])
-    entities = []
-    for e in entities_data:
-        entity = CombatEntity(
-            character_id=e.get('character_id', 0),
-            name=e.get('name', 'Неизвестный'),
-            entity_type=CombatEntityType(e.get('entity_type', 'npc')),
-            initiative=e.get('initiative', random.randint(1, 20)),
-            current_hp=e.get('current_hp', 20),
-            max_hp=e.get('max_hp', 20),
-            armor_class=e.get('armor_class', 10),
-            x=e.get('x', 0),
-            y=e.get('y', 0),
-            token_id=e.get('token_id', 0)
-        )
-        entities.append(entity)
+    # Выполняем бросок
+    result = dice_engine.roll(roll_request)
     
-    if not entities:
-        session.close()
-        return {"success": False, "message": "Нет участников для боя"}
+    # Сохраняем в БД
+    dice_engine.save_history_to_db(result)
     
-    # Начинаем бой
-    success = combat_manager.start_combat(room.id, entities)
-    
-    if success:
-        # Обновляем состояние комнаты
-        room.state = RoomState.COMBAT
-        session.commit()
-        session.close()
-        
-        # Уведомляем всех в комнате
-        engine = combat_manager.get_engine(room.id)
-        await broadcast_to_room(room.id, {
-            'type': 'combat_started',
-            'state': engine.get_state() if engine else {}
+    # Отправляем всем в комнате (если публичный)
+    if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
+        await broadcast_to_room(room_id, {
+            'type': 'dice_roll',
+            'result': result.to_dict(),
+            'animation': result.get_animation_data()
         })
-        
-        return {
-            'success': True,
-            'state': engine.get_state() if engine else {}
-        }
-    
-    session.close()
-    return {"success": False, "message": "Не удалось начать бой"}
-
-@app.post("/api/combat/end")
-async def end_combat(request: Request, data: dict):
-    """Завершает бой в комнате."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id_str = data.get('room_id')
-    if not room_id_str:
-        return {"success": False, "message": "Не указан room_id"}
-    
-    session = Session()
-    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-    if not room:
-        session.close()
-        return {"success": False, "message": "Комната не найдена"}
-    
-    if room.gm_id != user.id:
-        session.close()
-        return {"success": False, "message": "Только GM может завершить бой"}
-    
-    success = combat_manager.end_combat(room.id)
-    
-    if success:
-        room.state = RoomState.EXPLORATION
-        session.commit()
-        session.close()
-        
-        await broadcast_to_room(room.id, {
-            'type': 'combat_ended',
-            'message': 'Бой завершён'
-        })
-        
-        return {'success': True, 'message': 'Бой завершён'}
-    
-    session.close()
-    return {"success": False, "message": "Не удалось завершить бой"}
-
-@app.get("/api/combat/state/{room_id}")
-async def get_combat_state(room_id: str):
-    """Получает состояние боя в комнате."""
-    session = Session()
-    room = session.query(GameRoom).filter_by(room_id=room_id).first()
-    if not room:
-        session.close()
-        return {"success": False, "message": "Комната не найдена"}
-    
-    engine = combat_manager.get_engine(room.id)
-    session.close()
-    
-    if not engine:
-        return {"success": False, "message": "Бой не активен"}
     
     return {
         'success': True,
-        'state': engine.get_state()
+        'result': result.to_dict(),
+        'animation': result.get_animation_data()
     }
 
-@app.post("/api/combat/action")
-async def combat_action(request: Request, data: dict):
-    """Выполняет действие в бою."""
+@app.post("/api/dice/roll/formula")
+async def roll_dice_formula(request: Request, data: dict):
+    """Выполняет бросок по формуле (например: 2d6+4)."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
+    formula = data.get('formula', '1d20')
+    modifier = data.get('modifier', 0)
+    reason = data.get('reason', formula)
+    visibility = data.get('visibility', 'public')
     room_id_str = data.get('room_id')
-    entity_id = data.get('entity_id')
-    action_data = data.get('action', {})
+    character_id = data.get('character_id', 0)
     
-    if not room_id_str or not entity_id:
-        return {"success": False, "message": "Не указаны room_id или entity_id"}
+    try:
+        visibility_enum = DiceVisibility(visibility)
+    except ValueError:
+        visibility_enum = DiceVisibility.PUBLIC
     
-    session = Session()
-    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-    if not room:
+    room_id = 0
+    if room_id_str:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+        if room:
+            room_id = room.id
         session.close()
-        return {"success": False, "message": "Комната не найдена"}
     
-    engine = combat_manager.get_engine(room.id)
-    if not engine:
-        session.close()
-        return {"success": False, "message": "Бой не активен"}
-    
-    result = engine.perform_action(entity_id, action_data)
-    session.close()
-    
-    # Уведомляем всех в комнате
-    await broadcast_to_room(room.id, {
-        'type': 'combat_action',
-        'entity_id': entity_id,
-        'action': action_data,
-        'result': result,
-        'state': engine.get_state()
-    })
-    
-    return result
+    try:
+        result = dice_engine.roll_formula(
+            formula=formula,
+            modifier=modifier,
+            reason=reason,
+            visibility=visibility_enum,
+            user_id=user.id,
+            character_id=character_id,
+            room_id=room_id
+        )
+        
+        dice_engine.save_history_to_db(result)
+        
+        if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
+            await broadcast_to_room(room_id, {
+                'type': 'dice_roll',
+                'result': result.to_dict(),
+                'animation': result.get_animation_data()
+            })
+        
+        return {
+            'success': True,
+            'result': result.to_dict(),
+            'animation': result.get_animation_data()
+        }
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
 
-@app.post("/api/combat/skip_turn")
-async def skip_turn(request: Request, data: dict):
-    """Пропускает ход в бою."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id_str = data.get('room_id')
-    entity_id = data.get('entity_id')
-    
-    if not room_id_str or not entity_id:
-        return {"success": False, "message": "Не указаны room_id или entity_id"}
-    
+@app.get("/api/dice/history/{room_id}")
+async def get_dice_history(room_id: str, limit: int = 50):
+    """Получает историю бросков в комнате."""
     session = Session()
-    room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
-    if not room:
+    try:
+        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        if not room:
+            return {"success": False, "message": "Комната не найдена"}
+        
+        history = session.query(DiceHistory).filter_by(room_id=room.id).order_by(
+            DiceHistory.timestamp.desc()
+        ).limit(limit).all()
+        
+        return {
+            'success': True,
+            'history': [
+                {
+                    'id': h.id,
+                    'dice_type': h.dice_type,
+                    'count': h.count,
+                    'modifier': h.modifier,
+                    'formula': h.formula,
+                    'results': json.loads(h.results) if h.results else [],
+                    'total': h.total,
+                    'final_total': h.final_total,
+                    'is_critical': h.is_critical,
+                    'is_fumble': h.is_fumble,
+                    'visibility': h.visibility,
+                    'reason': h.reason,
+                    'timestamp': h.timestamp.isoformat()
+                }
+                for h in history
+            ]
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    finally:
         session.close()
-        return {"success": False, "message": "Комната не найдена"}
+
+@app.get("/api/dice/types")
+async def get_dice_types():
+    """Возвращает все поддерживаемые типы кубиков."""
+    return {
+        'success': True,
+        'dice_types': [
+            {'value': d, 'label': d.upper(), 'max_value': dice_engine.get_max_value(d)}
+            for d in dice_engine.get_supported_dice()
+        ]
+    }
+
+@app.post("/api/dice/parse")
+async def parse_dice_formula(data: dict):
+    """Разбирает формулу броска."""
+    formula = data.get('formula', '')
+    if not formula:
+        return {"success": False, "message": "Не указана формула"}
     
-    engine = combat_manager.get_engine(room.id)
-    if not engine:
-        session.close()
-        return {"success": False, "message": "Бой не активен"}
-    
-    success = engine.skip_turn(entity_id)
-    session.close()
-    
-    if success:
-        await broadcast_to_room(room.id, {
-            'type': 'combat_turn_skipped',
-            'entity_id': entity_id,
-            'state': engine.get_state()
-        })
-        return {'success': True}
-    
-    return {"success": False, "message": "Не удалось пропустить ход"}
+    try:
+        parsed = dice_engine.parse_formula(formula)
+        return {
+            'success': True,
+            'parsed': parsed
+        }
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
 
 # ============================================================
-# 9. WEBSOCKET HELPER
+# 8. WEBSOCKET HELPER
 # ============================================================
 
 async def broadcast_to_room(room_id: int, message: dict):
@@ -1006,7 +767,7 @@ async def broadcast_to_room(room_id: int, message: dict):
             pass
 
 # ============================================================
-# 10. БЫСТРЫЙ СТАРТ ДЛЯ ТЕСТИРОВАНИЯ
+# 9. БЫСТРЫЙ СТАРТ
 # ============================================================
 
 @app.get("/")
@@ -1120,7 +881,7 @@ async def room_page(request: Request, room_id: str):
     })
 
 # ============================================================
-# 11. WEBSOCKET
+# 10. WEBSOCKET
 # ============================================================
 
 @app.websocket("/ws/room/{room_id}")
@@ -1155,35 +916,48 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                         'timestamp': datetime.now().isoformat()
                     })
                 
-                elif msg_type == 'combat_action':
-                    # Обработка боевого действия через WebSocket
-                    entity_id = msg.get('entity_id')
-                    action_data = msg.get('action', {})
+                elif msg_type == 'dice_roll':
+                    # Бросок кубиков через WebSocket
+                    dice_type = msg.get('dice_type', 'd20')
+                    count = msg.get('count', 1)
+                    modifier = msg.get('modifier', 0)
+                    reason = msg.get('reason', 'Бросок')
+                    visibility = msg.get('visibility', 'public')
+                    character_id = msg.get('character_id', 0)
                     
-                    if entity_id:
-                        engine = combat_manager.get_engine(room.id)
-                        if engine:
-                            result = engine.perform_action(entity_id, action_data)
-                            await broadcast_to_room(room.id, {
-                                'type': 'combat_action_result',
-                                'entity_id': entity_id,
-                                'action': action_data,
-                                'result': result,
-                                'state': engine.get_state()
-                            })
-                
-                elif msg_type == 'combat_skip_turn':
-                    entity_id = msg.get('entity_id')
-                    if entity_id:
-                        engine = combat_manager.get_engine(room.id)
-                        if engine:
-                            success = engine.skip_turn(entity_id)
-                            if success:
-                                await broadcast_to_room(room.id, {
-                                    'type': 'combat_turn_skipped',
-                                    'entity_id': entity_id,
-                                    'state': engine.get_state()
-                                })
+                    try:
+                        visibility_enum = DiceVisibility(visibility)
+                    except ValueError:
+                        visibility_enum = DiceVisibility.PUBLIC
+                    
+                    roll_request = RollRequest(
+                        dice_type=dice_type,
+                        count=count,
+                        modifier=modifier,
+                        reason=reason,
+                        visibility=visibility_enum,
+                        user_id=msg.get('user_id', 0),
+                        character_id=character_id,
+                        room_id=room.id
+                    )
+                    
+                    result = dice_engine.roll(roll_request)
+                    dice_engine.save_history_to_db(result)
+                    
+                    if visibility_enum == DiceVisibility.PUBLIC:
+                        await broadcast_to_room(room.id, {
+                            'type': 'dice_roll',
+                            'result': result.to_dict(),
+                            'animation': result.get_animation_data()
+                        })
+                    else:
+                        # Секретный бросок — только GM
+                        gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
+                        if gm:
+                            await websocket.send_text(json.dumps({
+                                'type': 'dice_roll_secret',
+                                'result': result.to_dict()
+                            }))
                 
             except json.JSONDecodeError:
                 pass
@@ -1196,7 +970,7 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                 del connections[room.id]
 
 # ============================================================
-# 12. ЗАПУСК
+# 11. ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
