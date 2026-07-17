@@ -10,8 +10,14 @@ import json
 import secrets
 import os
 import uuid
-from typing import Dict, Optional, List
+import random
+import math
+from typing import Dict, Optional, List, Any
 from dataclasses import dataclass, field
+
+# ============================================================
+# 1. БАЗА ДАННЫХ
+# ============================================================
 
 Base = declarative_base()
 engine = create_engine('sqlite:///dnd_game.db', connect_args={'check_same_thread': False})
@@ -176,7 +182,510 @@ class PlayerGame(Base):
     player = relationship("User", foreign_keys=[player_id])
     table = relationship("GameTable", foreign_keys=[table_link])
 
-# ===== CHARACTER RUNTIME =====
+class GameSession(Base):
+    __tablename__ = 'game_sessions'
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(36), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    gm_id = Column(Integer, ForeignKey('users.id'))
+    table_link = Column(String, ForeignKey('game_tables.link'))
+    created_at = Column(DateTime, default=datetime.now)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    state = Column(String(20), default='LOBBY')
+    current_map = Column(String(255), default='')
+    current_scene = Column(String(100), default='')
+    current_round = Column(Integer, default=0)
+    current_turn = Column(Integer, default=0)
+    current_player_id = Column(Integer, nullable=True)
+    settings = Column(Text, default='{}')
+    gm = relationship("User", foreign_keys=[gm_id])
+    table = relationship("GameTable", foreign_keys=[table_link])
+    logs = relationship("SessionLog", back_populates="session", cascade="all, delete-orphan")
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'session_id': self.session_id,
+            'name': self.name,
+            'gm_id': self.gm_id,
+            'table_link': self.table_link,
+            'state': self.state,
+            'current_round': self.current_round,
+            'current_turn': self.current_turn,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None
+        }
+
+class SessionLog(Base):
+    __tablename__ = 'session_logs'
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey('game_sessions.id'))
+    timestamp = Column(DateTime, default=datetime.now)
+    event_type = Column(String(50))
+    actor_id = Column(Integer, nullable=True)
+    message = Column(Text)
+    data = Column(Text, default='{}')
+    session = relationship("GameSession", back_populates="logs")
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'event_type': self.event_type,
+            'actor_id': self.actor_id,
+            'message': self.message,
+            'data': json.loads(self.data) if self.data else {}
+        }
+
+# ============================================================
+# 2. COMBAT ENGINE
+# ============================================================
+
+class CombatEngine:
+    """Универсальный боевой движок. Единственный источник истины."""
+    
+    # Словарь со всеми способностями
+    ABILITIES = {
+        'fireball': {
+            'id': 'fireball',
+            'name': 'Fireball',
+            'type': 'spell',
+            'range': 18,
+            'cost': {'action': 1, 'mana': 10},
+            'damage': {'dice': '8d6', 'type': 'fire'},
+            'save': {'ability': 'dex', 'dc': 15},
+            'effects': ['burn'],
+            'animation': 'fireball',
+            'sound': 'fireball.wav'
+        },
+        'sword_attack': {
+            'id': 'sword_attack',
+            'name': 'Sword Attack',
+            'type': 'attack',
+            'range': 1,
+            'cost': {'action': 1},
+            'damage': {'dice': '1d8+3', 'type': 'slashing'},
+            'save': None,
+            'effects': [],
+            'animation': 'slash',
+            'sound': 'sword.wav'
+        },
+        'heal': {
+            'id': 'heal',
+            'name': 'Heal',
+            'type': 'spell',
+            'range': 6,
+            'cost': {'action': 1, 'mana': 5},
+            'damage': {'dice': '2d8+4', 'type': 'healing'},
+            'save': None,
+            'effects': ['healing'],
+            'animation': 'heal',
+            'sound': 'heal.wav'
+        },
+        'firebolt': {
+            'id': 'firebolt',
+            'name': 'Firebolt',
+            'type': 'spell',
+            'range': 12,
+            'cost': {'action': 1, 'mana': 3},
+            'damage': {'dice': '2d6', 'type': 'fire'},
+            'save': None,
+            'effects': ['burn'],
+            'animation': 'firebolt',
+            'sound': 'firebolt.wav'
+        }
+    }
+    
+    @staticmethod
+    def roll_dice(dice_str: str) -> int:
+        """Бросает кости в формате 2d6 или 1d8+3"""
+        if '+' in dice_str:
+            parts = dice_str.split('+')
+            dice_part = parts[0].strip()
+            bonus = int(parts[1].strip())
+        elif '-' in dice_str:
+            parts = dice_str.split('-')
+            dice_part = parts[0].strip()
+            bonus = -int(parts[1].strip())
+        else:
+            dice_part = dice_str
+            bonus = 0
+        
+        if 'd' in dice_part:
+            count, sides = dice_part.split('d')
+            count = int(count) if count else 1
+            sides = int(sides)
+            total = sum(random.randint(1, sides) for _ in range(count))
+            return total + bonus
+        else:
+            return int(dice_part) + bonus
+    
+    @staticmethod
+    def calculate_distance(pos1: tuple, pos2: tuple) -> float:
+        """Рассчитывает расстояние между двумя точками."""
+        return math.sqrt((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2)
+    
+    @staticmethod
+    def check_visibility(source: str, target: str, table_link: str) -> bool:
+        """Проверяет видимость цели."""
+        # TODO: Реализовать полноценную проверку видимости
+        return True
+    
+    @staticmethod
+    def check_conditions(runtime) -> tuple:
+        """Проверяет состояния персонажа."""
+        if not runtime.is_alive:
+            return False, "Персонаж мёртв"
+        if runtime.is_unconscious:
+            return False, "Персонаж без сознания"
+        if 'paralyzed' in runtime.conditions:
+            return False, "Персонаж парализован"
+        if 'stunned' in runtime.conditions:
+            return False, "Персонаж оглушён"
+        return True, "OK"
+    
+    @staticmethod
+    def check_resources(runtime, ability) -> tuple:
+        """Проверяет наличие ресурсов для способности."""
+        cost = ability.get('cost', {})
+        
+        if cost.get('action', 0):
+            if runtime.action_used:
+                return False, "Основное действие уже использовано"
+        
+        if cost.get('bonus_action', 0):
+            if runtime.bonus_action_used:
+                return False, "Бонусное действие уже использовано"
+        
+        if cost.get('reaction', 0):
+            if runtime.reaction_used:
+                return False, "Реакция уже использована"
+        
+        if cost.get('mana', 0):
+            if runtime.mana < cost['mana']:
+                return False, f"Недостаточно маны (нужно {cost['mana']})"
+        
+        if cost.get('energy', 0):
+            if runtime.energy < cost['energy']:
+                return False, f"Недостаточно энергии (нужно {cost['energy']})"
+        
+        return True, "OK"
+    
+    @staticmethod
+    def calculate_attack_roll(attacker: CharacterRuntime, ability: dict) -> tuple:
+        """Вычисляет бросок атаки."""
+        # Базовая атака = d20 + модификатор
+        base_roll = random.randint(1, 20)
+        
+        # Модификатор зависит от типа способности
+        if ability['type'] == 'spell':
+            # Для заклинаний используем INT или WIS
+            mod = (attacker.intelligence - 10) // 2
+        else:
+            # Для физических атак используем STR или DEX
+            mod = (attacker.strength - 10) // 2
+        
+        total = base_roll + mod
+        return base_roll, total
+    
+    @staticmethod
+    def calculate_saving_throw(target: CharacterRuntime, ability: dict) -> tuple:
+        """Вычисляет спасбросок цели."""
+        if 'save' not in ability:
+            return True, 0
+        
+        save_info = ability['save']
+        ability_name = save_info['ability']
+        dc = save_info['dc']
+        
+        # Получаем модификатор спасброска
+        save_map = {
+            'str': target.str_save,
+            'dex': target.dex_save,
+            'con': target.con_save,
+            'int': target.int_save,
+            'wis': target.wis_save,
+            'cha': target.cha_save
+        }
+        
+        mod = save_map.get(ability_name, 0)
+        roll = random.randint(1, 20) + mod
+        
+        success = roll >= dc
+        return success, roll
+    
+    @staticmethod
+    def calculate_damage(dice_str: str, damage_type: str, target: CharacterRuntime) -> int:
+        """Рассчитывает урон с учётом сопротивлений."""
+        damage = CombatEngine.roll_dice(dice_str)
+        
+        # TODO: Реализовать сопротивления, иммунитеты и уязвимости
+        # Пока просто возвращаем урон
+        
+        return max(0, damage)
+    
+    @staticmethod
+    def apply_effects(target: CharacterRuntime, effects: list):
+        """Применяет эффекты к цели."""
+        for effect in effects:
+            if effect == 'burn':
+                if 'burn' not in target.conditions:
+                    target.conditions.append('burn')
+                    target.log_event('effect_applied', target.character_id, f"На персонажа наложено горение")
+            
+            elif effect == 'healing':
+                # Лечение уже обработано в resolve_action
+                pass
+    
+    @staticmethod
+    def resolve_action(
+        source_runtime: CharacterRuntime,
+        target_runtime: CharacterRuntime,
+        ability_id: str,
+        table_link: str
+    ) -> dict:
+        """
+        Главная функция боевого движка.
+        Получает действие, полностью рассчитывает результат.
+        """
+        # Получаем способность
+        ability = CombatEngine.ABILITIES.get(ability_id)
+        if not ability:
+            return {
+                'success': False,
+                'error': f"Способность {ability_id} не найдена"
+            }
+        
+        # 1. Проверка хода и состояния
+        can_act, msg = CombatEngine.check_conditions(source_runtime)
+        if not can_act:
+            return {
+                'success': False,
+                'error': msg,
+                'source': source_runtime.to_dict(),
+                'target': target_runtime.to_dict()
+            }
+        
+        # 2. Проверка ресурсов
+        has_resources, msg = CombatEngine.check_resources(source_runtime, ability)
+        if not has_resources:
+            return {
+                'success': False,
+                'error': msg,
+                'source': source_runtime.to_dict(),
+                'target': target_runtime.to_dict()
+            }
+        
+        # 3. Проверка дистанции
+        source_pos = (source_runtime.x, source_runtime.y)
+        target_pos = (target_runtime.x, target_runtime.y)
+        distance = CombatEngine.calculate_distance(source_pos, target_pos)
+        
+        if distance > ability.get('range', 999):
+            return {
+                'success': False,
+                'error': f"Цель слишком далеко (дистанция: {distance:.1f}, нужно: {ability['range']})",
+                'source': source_runtime.to_dict(),
+                'target': target_runtime.to_dict()
+            }
+        
+        # 4. Проверка видимости
+        if not CombatEngine.check_visibility(source_runtime.runtime_id, target_runtime.runtime_id, table_link):
+            return {
+                'success': False,
+                'error': "Цель не видна",
+                'source': source_runtime.to_dict(),
+                'target': target_runtime.to_dict()
+            }
+        
+        # 5. Бросок и проверка
+        hit = False
+        save_success = False
+        damage = 0
+        roll_info = {}
+        
+        # Для способностей с спасброском
+        if 'save' in ability:
+            save_success, save_roll = CombatEngine.calculate_saving_throw(target_runtime, ability)
+            roll_info['save_roll'] = save_roll
+            roll_info['save_dc'] = ability['save']['dc']
+            roll_info['save_ability'] = ability['save']['ability']
+            
+            if not save_success:
+                # Цель не спаслась, получает полный урон
+                damage = CombatEngine.calculate_damage(
+                    ability['damage']['dice'],
+                    ability['damage']['type'],
+                    target_runtime
+                )
+                hit = True
+            else:
+                # Цель спаслась, получает половину урона
+                damage = CombatEngine.calculate_damage(
+                    ability['damage']['dice'],
+                    ability['damage']['type'],
+                    target_runtime
+                ) // 2
+                hit = True
+        else:
+            # Атака без спасброска (прямой урон)
+            damage = CombatEngine.calculate_damage(
+                ability['damage']['dice'],
+                ability['damage']['type'],
+                target_runtime
+            )
+            hit = True
+        
+        # 6. Применяем урон
+        actual_damage = 0
+        if hit and damage > 0:
+            if ability['damage']['type'] == 'healing':
+                # Лечение
+                actual_damage = target_runtime.heal(damage)
+            else:
+                # Урон
+                actual_damage = target_runtime.take_damage(damage)
+        
+        # 7. Применяем эффекты
+        if hit:
+            CombatEngine.apply_effects(target_runtime, ability.get('effects', []))
+        
+        # 8. Тратим ресурсы
+        cost = ability.get('cost', {})
+        if cost.get('action', 0):
+            source_runtime.action_used = True
+        if cost.get('mana', 0):
+            source_runtime.mana -= cost['mana']
+        if cost.get('energy', 0):
+            source_runtime.energy -= cost['energy']
+        
+        source_runtime.last_updated = datetime.now()
+        target_runtime.last_updated = datetime.now()
+        
+        # 9. Формируем результат
+        result = {
+            'success': True,
+            'source': source_runtime.to_dict(),
+            'target': target_runtime.to_dict(),
+            'ability': {
+                'id': ability_id,
+                'name': ability['name'],
+                'type': ability['type'],
+                'animation': ability.get('animation', 'default'),
+                'sound': ability.get('sound', 'default.wav')
+            },
+            'roll_info': roll_info,
+            'hit': hit,
+            'damage': actual_damage,
+            'damage_type': ability['damage']['type'],
+            'effects_applied': ability.get('effects', []),
+            'save_success': save_success if 'save' in ability else None,
+            'distance': distance
+        }
+        
+        return result
+
+# ============================================================
+# 3. БАЗА ДАННЫХ (продолжение)
+# ============================================================
+
+def migrate_database():
+    session = Session()
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        
+        if 'characters' not in inspector.get_table_names():
+            print("🔄 Создаём таблицы системы персонажей...")
+            Base.metadata.create_all(engine)
+            print("✅ Таблицы созданы!")
+        
+        columns = [col['name'] for col in inspector.get_columns('game_tokens')]
+        if 'character_id' not in columns:
+            print("🔄 Добавляем character_id в game_tokens...")
+            session.execute("ALTER TABLE game_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id)")
+            session.commit()
+            print("✅ Связь добавлена!")
+        
+        if 'game_sessions' not in inspector.get_table_names():
+            print("🔄 Создаём таблицы Game Session...")
+            Base.metadata.create_all(engine)
+            print("✅ Таблицы сессий созданы!")
+            
+    except Exception as e:
+        print(f"⚠️ Ошибка миграции: {e}")
+    finally:
+        session.close()
+
+Base.metadata.create_all(engine)
+migrate_database()
+
+# ============================================================
+# 4. FASTAPI
+# ============================================================
+
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+AVATAR_DIR = "static/avatars"
+MAP_DIR = "static/maps"
+os.makedirs(AVATAR_DIR, exist_ok=True)
+os.makedirs(MAP_DIR, exist_ok=True)
+
+connections = {}
+
+# ============================================================
+# 5. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def get_user_by_login_or_email(login_or_email):
+    session = Session()
+    user = session.query(User).filter((User.login == login_or_email) | (User.email == login_or_email)).first()
+    session.close()
+    return user
+
+def get_user_by_id(user_id):
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    session.close()
+    return user
+
+def create_user(login, email, password, role='unassigned'):
+    session = Session()
+    user = User(login=login, email=email, password_hash=hash_password(password), role=role)
+    session.add(user)
+    session.commit()
+    user_id = user.id
+    session.close()
+    return user_id
+
+def get_current_user(request):
+    from itsdangerous import URLSafeTimedSerializer
+    serializer = URLSafeTimedSerializer("dnd_super_secret_key_2025")
+    session_cookie = request.cookies.get("session")
+    if not session_cookie:
+        return None
+    try:
+        data = serializer.loads(session_cookie, max_age=60 * 60 * 24 * 7)
+        user_id = data.get("user_id")
+        if user_id:
+            return get_user_by_id(user_id)
+    except:
+        return None
+    return None
+
+def generate_table_link():
+    return secrets.token_urlsafe(8)
+
+# ============================================================
+# 6. CHARACTER RUNTIME
+# ============================================================
 
 @dataclass
 class CharacterRuntime:
@@ -213,6 +722,18 @@ class CharacterRuntime:
     equipped_items: Dict[str, int] = field(default_factory=dict)
     x: float = 0
     y: float = 0
+    strength: int = 10
+    dexterity: int = 10
+    constitution: int = 10
+    intelligence: int = 10
+    wisdom: int = 10
+    charisma: int = 10
+    str_save: int = 0
+    dex_save: int = 0
+    con_save: int = 0
+    int_save: int = 0
+    wis_save: int = 0
+    cha_save: int = 0
     created_at: datetime = field(default_factory=datetime.now)
     last_updated: datetime = field(default_factory=datetime.now)
 
@@ -250,6 +771,18 @@ class CharacterRuntime:
             'equipped_items': self.equipped_items,
             'x': self.x,
             'y': self.y,
+            'strength': self.strength,
+            'dexterity': self.dexterity,
+            'constitution': self.constitution,
+            'intelligence': self.intelligence,
+            'wisdom': self.wisdom,
+            'charisma': self.charisma,
+            'str_save': self.str_save,
+            'dex_save': self.dex_save,
+            'con_save': self.con_save,
+            'int_save': self.int_save,
+            'wis_save': self.wis_save,
+            'cha_save': self.cha_save,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_updated': self.last_updated.isoformat() if self.last_updated else None
         }
@@ -272,7 +805,7 @@ class CharacterRuntime:
         return damage
 
     def heal(self, amount: int) -> int:
-        max_hp = 20
+        max_hp = 20  # TODO: брать из Character
         old_hp = self.current_hp
         self.current_hp = min(max_hp, self.current_hp + amount)
         if self.current_hp > 0:
@@ -332,8 +865,8 @@ class CharacterRuntime:
             self.conditions.remove(condition)
             self.last_updated = datetime.now()
 
-
-# ===== CHARACTER RUNTIME MANAGER =====
+    def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
+        pass  # TODO: связать с SessionLog
 
 class CharacterRuntimeManager:
     def __init__(self):
@@ -361,7 +894,19 @@ class CharacterRuntimeManager:
             rage=character.rage,
             luck=character.luck,
             inspiration=character.inspiration,
-            hit_dice=character.hit_dice
+            hit_dice=character.hit_dice,
+            strength=character.strength,
+            dexterity=character.dexterity,
+            constitution=character.constitution,
+            intelligence=character.intelligence,
+            wisdom=character.wisdom,
+            charisma=character.charisma,
+            str_save=character.str_save,
+            dex_save=character.dex_save,
+            con_save=character.con_save,
+            int_save=character.int_save,
+            wis_save=character.wis_save,
+            cha_save=character.cha_save
         )
         self._runtimes[runtime.runtime_id] = runtime
         self._character_runtimes[character_id] = runtime.runtime_id
@@ -447,90 +992,281 @@ class CharacterRuntimeManager:
         finally:
             session.close()
 
-
 runtime_manager = CharacterRuntimeManager()
 
-# ===== МИГРАЦИЯ =====
+# ============================================================
+# 7. GAME SESSION
+# ============================================================
 
-def migrate_database():
-    session = Session()
-    try:
-        from sqlalchemy import inspect
-        inspector = inspect(engine)
-        if 'characters' not in inspector.get_table_names():
-            print("🔄 Создаём таблицы системы персонажей...")
-            Base.metadata.create_all(engine)
-            print("✅ Таблицы созданы!")
-        columns = [col['name'] for col in inspector.get_columns('game_tokens')]
-        if 'character_id' not in columns:
-            print("🔄 Добавляем character_id в game_tokens...")
-            session.execute("ALTER TABLE game_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id)")
-            session.commit()
-            print("✅ Связь добавлена!")
-    except Exception as e:
-        print(f"⚠️ Ошибка миграции: {e}")
-    finally:
-        session.close()
+class GameSessionRuntime:
+    def __init__(self, session_id: str, name: str, gm_id: int, table_link: str):
+        self.session_id = session_id
+        self.name = name
+        self.gm_id = gm_id
+        self.table_link = table_link
+        self.state = 'LOBBY'
+        self.created_at = datetime.now()
+        self.started_at = None
+        self.finished_at = None
+        self.current_map = ''
+        self.current_scene = ''
+        self.current_round = 0
+        self.current_turn = 0
+        self.current_player_id = None
+        self.players: Dict[int, 'PlayerSession'] = {}
+        self.runtimes: Dict[str, CharacterRuntime] = {}
+        self.npc_runtimes: Dict[str, CharacterRuntime] = {}
+        self.monsters: Dict[str, CharacterRuntime] = {}
+        self.event_queue: List[Dict] = []
+        self.settings = {'max_players': 6, 'combat_style': 'standard', 'initiative_visible': True, 'auto_roll': False}
+        self.logs: List[Dict] = []
+        self.is_active = True
 
-Base.metadata.create_all(engine)
-migrate_database()
+    def to_dict(self) -> dict:
+        return {
+            'session_id': self.session_id,
+            'name': self.name,
+            'gm_id': self.gm_id,
+            'table_link': self.table_link,
+            'state': self.state,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+            'current_round': self.current_round,
+            'current_turn': self.current_turn,
+            'current_player_id': self.current_player_id,
+            'players_count': len(self.players),
+            'runtimes_count': len(self.runtimes),
+            'settings': self.settings
+        }
 
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+    def add_player(self, player_session: 'PlayerSession') -> bool:
+        if player_session.player_id in self.players:
+            return False
+        self.players[player_session.player_id] = player_session
+        self.log_event('player_joined', player_session.player_id, f"Игрок {player_session.player_name} присоединился")
+        return True
 
-AVATAR_DIR = "static/avatars"
-MAP_DIR = "static/maps"
-os.makedirs(AVATAR_DIR, exist_ok=True)
-os.makedirs(MAP_DIR, exist_ok=True)
+    def remove_player(self, player_id: int) -> bool:
+        if player_id not in self.players:
+            return False
+        player = self.players.pop(player_id)
+        self.log_event('player_left', player_id, f"Игрок {player.player_name} покинул сессию")
+        return True
 
-connections = {}
+    def add_runtime(self, runtime: CharacterRuntime) -> bool:
+        if runtime.runtime_id in self.runtimes:
+            return False
+        self.runtimes[runtime.runtime_id] = runtime
+        self.log_event('runtime_added', runtime.character_id, f"Персонаж {runtime.character_id} добавлен в сессию")
+        return True
 
-# -------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ --------
+    def remove_runtime(self, runtime_id: str) -> bool:
+        if runtime_id not in self.runtimes:
+            return False
+        runtime = self.runtimes.pop(runtime_id)
+        self.log_event('runtime_removed', runtime.character_id, f"Персонаж {runtime.character_id} удалён из сессии")
+        return True
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'event_type': event_type,
+            'actor_id': actor_id,
+            'message': message,
+            'data': data or {}
+        }
+        self.logs.append(log_entry)
+        self.event_queue.append(log_entry)
+        if len(self.logs) > 1000:
+            self.logs = self.logs[-1000:]
 
-def get_user_by_login_or_email(login_or_email):
-    session = Session()
-    user = session.query(User).filter((User.login == login_or_email) | (User.email == login_or_email)).first()
-    session.close()
-    return user
+    def start_session(self) -> bool:
+        if self.state not in ['LOBBY', 'WAITING_PLAYERS']:
+            return False
+        self.state = 'PLAYING'
+        self.started_at = datetime.now()
+        self.log_event('session_started', self.gm_id, "Сессия начата")
+        return True
 
-def get_user_by_id(user_id):
-    session = Session()
-    user = session.query(User).filter_by(id=user_id).first()
-    session.close()
-    return user
+    def pause_session(self) -> bool:
+        if self.state not in ['PLAYING', 'COMBAT']:
+            return False
+        self.state = 'PAUSED'
+        self.log_event('session_paused', self.gm_id, "Сессия на паузе")
+        return True
 
-def create_user(login, email, password, role='unassigned'):
-    session = Session()
-    user = User(login=login, email=email, password_hash=hash_password(password), role=role)
-    session.add(user)
-    session.commit()
-    user_id = user.id
-    session.close()
-    return user_id
+    def resume_session(self) -> bool:
+        if self.state != 'PAUSED':
+            return False
+        self.state = 'PLAYING'
+        self.log_event('session_resumed', self.gm_id, "Сессия возобновлена")
+        return True
 
-def get_current_user(request):
-    from itsdangerous import URLSafeTimedSerializer
-    serializer = URLSafeTimedSerializer("dnd_super_secret_key_2025")
-    session_cookie = request.cookies.get("session")
-    if not session_cookie:
+    def finish_session(self) -> bool:
+        if self.state == 'FINISHED':
+            return False
+        self.state = 'FINISHED'
+        self.finished_at = datetime.now()
+        self.is_active = False
+        self.log_event('session_finished', self.gm_id, "Сессия завершена")
+        return True
+
+    def get_players_ready(self) -> bool:
+        if not self.players:
+            return False
+        return all(p.ready for p in self.players.values())
+
+
+class PlayerSession:
+    def __init__(self, player_id: int, player_name: str, connection_id: str = None):
+        self.player_id = player_id
+        self.player_name = player_name
+        self.connection_id = connection_id
+        self.character_runtime_id: Optional[str] = None
+        self.ready = False
+        self.online = True
+        self.ping = 0
+        self.last_activity = datetime.now()
+        self.joined_at = datetime.now()
+
+    def to_dict(self) -> dict:
+        return {
+            'player_id': self.player_id,
+            'player_name': self.player_name,
+            'connection_id': self.connection_id,
+            'character_runtime_id': self.character_runtime_id,
+            'ready': self.ready,
+            'online': self.online,
+            'ping': self.ping,
+            'last_activity': self.last_activity.isoformat() if self.last_activity else None,
+            'joined_at': self.joined_at.isoformat() if self.joined_at else None
+        }
+
+    def set_ready(self, ready: bool):
+        self.ready = ready
+        self.last_activity = datetime.now()
+
+    def update_ping(self, ping: int):
+        self.ping = ping
+        self.last_activity = datetime.now()
+
+    def set_character(self, runtime_id: str):
+        self.character_runtime_id = runtime_id
+        self.ready = True
+        self.last_activity = datetime.now()
+
+
+class SessionManager:
+    def __init__(self):
+        self._sessions: Dict[str, GameSessionRuntime] = {}
+        self._table_sessions: Dict[str, str] = {}
+        self._player_sessions: Dict[int, str] = {}
+
+    def create_session(self, name: str, gm_id: int, table_link: str) -> GameSessionRuntime:
+        session_id = str(uuid.uuid4())
+        db_session = Session()
+        try:
+            game_session = GameSession(
+                session_id=session_id,
+                name=name,
+                gm_id=gm_id,
+                table_link=table_link,
+                state='LOBBY'
+            )
+            db_session.add(game_session)
+            db_session.commit()
+        except Exception as e:
+            db_session.rollback()
+            raise e
+        finally:
+            db_session.close()
+        runtime = GameSessionRuntime(session_id, name, gm_id, table_link)
+        self._sessions[session_id] = runtime
+        self._table_sessions[table_link] = session_id
+        return runtime
+
+    def get_session(self, session_id: str) -> Optional[GameSessionRuntime]:
+        return self._sessions.get(session_id)
+
+    def get_session_by_table(self, table_link: str) -> Optional[GameSessionRuntime]:
+        session_id = self._table_sessions.get(table_link)
+        if session_id:
+            return self._sessions.get(session_id)
         return None
-    try:
-        data = serializer.loads(session_cookie, max_age=60 * 60 * 24 * 7)
-        user_id = data.get("user_id")
-        if user_id:
-            return get_user_by_id(user_id)
-    except:
+
+    def get_session_by_player(self, player_id: int) -> Optional[GameSessionRuntime]:
+        session_id = self._player_sessions.get(player_id)
+        if session_id:
+            return self._sessions.get(session_id)
         return None
-    return None
 
-def generate_table_link():
-    return secrets.token_urlsafe(8)
+    def add_player_to_session(self, session_id: str, player_id: int, player_name: str, connection_id: str = None) -> bool:
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        player_session = PlayerSession(player_id, player_name, connection_id)
+        if session.add_player(player_session):
+            self._player_sessions[player_id] = session_id
+            return True
+        return False
 
-# ===== API: CHARACTERS =====
+    def remove_player_from_session(self, player_id: int) -> bool:
+        session_id = self._player_sessions.get(player_id)
+        if not session_id:
+            return False
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        if session.remove_player(player_id):
+            self._player_sessions.pop(player_id, None)
+            return True
+        return False
+
+    def delete_session(self, session_id: str) -> bool:
+        session = self._sessions.pop(session_id, None)
+        if not session:
+            return False
+        self._table_sessions.pop(session.table_link, None)
+        for player_id in list(session.players.keys()):
+            self._player_sessions.pop(player_id, None)
+        db_session = Session()
+        try:
+            db_game_session = db_session.query(GameSession).filter_by(session_id=session_id).first()
+            if db_game_session:
+                db_game_session.state = 'FINISHED'
+                db_game_session.finished_at = datetime.now()
+                db_session.commit()
+        except Exception as e:
+            db_session.rollback()
+            print(f"Error updating session in DB: {e}")
+        finally:
+            db_session.close()
+        return True
+
+    def get_all_sessions(self) -> List[GameSessionRuntime]:
+        return list(self._sessions.values())
+
+    def get_player_session(self, player_id: int) -> Optional[PlayerSession]:
+        session_id = self._player_sessions.get(player_id)
+        if not session_id:
+            return None
+        session = self._sessions.get(session_id)
+        if not session:
+            return None
+        return session.players.get(player_id)
+
+    def get_session_logs(self, session_id: str, limit: int = 50) -> List[Dict]:
+        session = self._sessions.get(session_id)
+        if not session:
+            return []
+        return session.logs[-limit:]
+
+session_manager = SessionManager()
+
+# ============================================================
+# 8. API: CHARACTERS
+# ============================================================
 
 @app.post("/api/character/create")
 async def create_character(request: Request, data: dict):
@@ -642,7 +1378,9 @@ async def get_character(character_id: int):
     finally:
         session.close()
 
-# ===== API: CHARACTER RUNTIME =====
+# ============================================================
+# 9. API: CHARACTER RUNTIME
+# ============================================================
 
 @app.post("/api/runtime/create")
 async def create_runtime(request: Request, data: dict):
@@ -708,7 +1446,214 @@ async def delete_runtime(request: Request, data: dict):
         return {"success": False, "message": "Runtime не найден"}
     return {"success": True, "message": "Runtime удалён"}
 
-# ===== API: TABLES, TOKENS, MAP =====
+# ============================================================
+# 10. API: COMBAT
+# ============================================================
+
+@app.post("/api/combat/action")
+async def combat_action(request: Request, data: dict):
+    """Выполняет боевое действие."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    source_runtime_id = data.get('source_runtime_id')
+    target_runtime_id = data.get('target_runtime_id')
+    ability_id = data.get('ability_id')
+    
+    if not source_runtime_id or not target_runtime_id or not ability_id:
+        return {"success": False, "message": "Не указаны source_runtime_id, target_runtime_id или ability_id"}
+    
+    # Получаем Runtime
+    source_runtime = runtime_manager.get_runtime(source_runtime_id)
+    target_runtime = runtime_manager.get_runtime(target_runtime_id)
+    
+    if not source_runtime:
+        return {"success": False, "message": "Источник не найден"}
+    if not target_runtime:
+        return {"success": False, "message": "Цель не найдена"}
+    
+    # Выполняем действие
+    result = CombatEngine.resolve_action(
+        source_runtime,
+        target_runtime,
+        ability_id,
+        data.get('table_link', '')
+    )
+    
+    if not result.get('success'):
+        return result
+    
+    # Отправляем результат всем в комнате
+    table_link = data.get('table_link')
+    if table_link and table_link in connections:
+        for ws in connections[table_link]:
+            try:
+                await ws.send_text(json.dumps({
+                    'type': 'combat_result',
+                    'result': result
+                }))
+            except:
+                pass
+    
+    # Сохраняем изменения Runtime
+    runtime_manager.save_runtime_to_character(source_runtime_id)
+    runtime_manager.save_runtime_to_character(target_runtime_id)
+    
+    return {
+        'success': True,
+        'result': result
+    }
+
+@app.get("/api/combat/abilities")
+async def get_abilities():
+    """Возвращает список всех доступных способностей."""
+    return {
+        'success': True,
+        'abilities': list(CombatEngine.ABILITIES.values())
+    }
+
+@app.get("/api/combat/ability/{ability_id}")
+async def get_ability(ability_id: str):
+    """Возвращает информацию о способности."""
+    ability = CombatEngine.ABILITIES.get(ability_id)
+    if not ability:
+        return {"success": False, "message": "Способность не найдена"}
+    return {"success": True, "ability": ability}
+
+# ============================================================
+# 11. API: GAME SESSION
+# ============================================================
+
+@app.post("/api/session/create")
+async def create_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    if user.role != 'gm':
+        return {"success": False, "message": "Только GM может создавать сессии"}
+    name = data.get('name')
+    table_link = data.get('table_link')
+    if not name or not table_link:
+        return {"success": False, "message": "Не указаны name или table_link"}
+    try:
+        session = session_manager.create_session(name, user.id, table_link)
+        return {"success": True, "session": session.to_dict()}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@app.post("/api/session/join")
+async def join_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session_id = data.get('session_id')
+    if not session_id:
+        return {"success": False, "message": "Не указан session_id"}
+    success = session_manager.add_player_to_session(session_id, user.id, user.login, data.get('connection_id'))
+    if not success:
+        return {"success": False, "message": "Не удалось присоединиться к сессии"}
+    session = session_manager.get_session(session_id)
+    return {"success": True, "session": session.to_dict() if session else None}
+
+@app.post("/api/session/leave")
+async def leave_session(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    success = session_manager.remove_player_from_session(user.id)
+    if not success:
+        return {"success": False, "message": "Не удалось покинуть сессию"}
+    return {"success": True, "message": "Вы покинули сессию"}
+
+@app.get("/api/session/{session_id}")
+async def get_session_info(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"success": False, "message": "Сессия не найдена"}
+    return {"success": True, "session": session.to_dict(), "players": [p.to_dict() for p in session.players.values()]}
+
+@app.post("/api/session/start")
+async def start_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session_id = data.get('session_id')
+    if not session_id:
+        return {"success": False, "message": "Не указан session_id"}
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"success": False, "message": "Сессия не найдена"}
+    if session.gm_id != user.id:
+        return {"success": False, "message": "Только GM может начать сессию"}
+    if not session.start_session():
+        return {"success": False, "message": "Не удалось начать сессию"}
+    return {"success": True, "session": session.to_dict()}
+
+@app.post("/api/session/pause")
+async def pause_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session_id = data.get('session_id')
+    if not session_id:
+        return {"success": False, "message": "Не указан session_id"}
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"success": False, "message": "Сессия не найдена"}
+    if session.gm_id != user.id:
+        return {"success": False, "message": "Только GM может ставить на паузу"}
+    if not session.pause_session():
+        return {"success": False, "message": "Не удалось поставить на паузу"}
+    return {"success": True, "session": session.to_dict()}
+
+@app.post("/api/session/resume")
+async def resume_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session_id = data.get('session_id')
+    if not session_id:
+        return {"success": False, "message": "Не указан session_id"}
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"success": False, "message": "Сессия не найдена"}
+    if session.gm_id != user.id:
+        return {"success": False, "message": "Только GM может возобновить сессию"}
+    if not session.resume_session():
+        return {"success": False, "message": "Не удалось возобновить сессию"}
+    return {"success": True, "session": session.to_dict()}
+
+@app.post("/api/session/finish")
+async def finish_session(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session_id = data.get('session_id')
+    if not session_id:
+        return {"success": False, "message": "Не указан session_id"}
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"success": False, "message": "Сессия не найдена"}
+    if session.gm_id != user.id:
+        return {"success": False, "message": "Только GM может завершить сессию"}
+    if not session.finish_session():
+        return {"success": False, "message": "Не удалось завершить сессию"}
+    return {"success": True, "session": session.to_dict()}
+
+@app.get("/api/session/{session_id}/logs")
+async def get_session_logs(session_id: str, limit: int = 50):
+    logs = session_manager.get_session_logs(session_id, limit)
+    return {"success": True, "logs": logs}
+
+@app.get("/api/sessions")
+async def get_all_sessions():
+    sessions = session_manager.get_all_sessions()
+    return {"success": True, "sessions": [s.to_dict() for s in sessions]}
+
+# ============================================================
+# 12. API: TABLES, TOKENS, MAP
+# ============================================================
 
 @app.post("/api/upload_avatar")
 async def upload_avatar(file: UploadFile = File(...)):
@@ -1063,6 +2008,10 @@ async def delete_table(data: dict):
     finally:
         session.close()
 
+# ============================================================
+# 13. ИНИЦИАЛИЗАЦИЯ БИБЛИОТЕК
+# ============================================================
+
 def init_libraries():
     session = Session()
     if session.query(Settings).first():
@@ -1082,7 +2031,9 @@ def init_libraries():
 
 init_libraries()
 
-# -------- СТРАНИЦЫ --------
+# ============================================================
+# 14. СТРАНИЦЫ
+# ============================================================
 
 @app.get("/")
 async def root(request: Request):
@@ -1267,7 +2218,9 @@ async def game_room(request: Request, table_link: str):
         session.close()
         return HTMLResponse(content=f"<h2>Ошибка: {e}</h2>", status_code=500)
 
-# -------- WEBSOCKET --------
+# ============================================================
+# 15. WEBSOCKET
+# ============================================================
 
 @app.websocket("/ws/{table_link}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: int):
@@ -1278,14 +2231,40 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
     user = get_user_by_id(player_id)
     player_name = user.login if user else str(player_id)
     
+    # Находим или создаём сессию для стола
+    session = session_manager.get_session_by_table(table_link)
+    if not session:
+        gm = Session().query(GameTable).filter_by(link=table_link).first()
+        if gm:
+            session = session_manager.create_session(
+                f"Session for {table_link}",
+                gm.gm_id,
+                table_link
+            )
+    
+    # Добавляем игрока в сессию
+    if session:
+        session_manager.add_player_to_session(
+            session.session_id,
+            player_id,
+            player_name,
+            str(id(websocket))
+        )
+        await websocket.send_text(json.dumps({
+            "type": "session_joined",
+            "session": session.to_dict()
+        }))
+    
     # Создаём Runtime для персонажа
-    session = Session()
-    token = session.query(GameToken).filter_by(table_link=table_link, owner_name=player_name, is_active=True).first()
-    session.close()
+    db_session = Session()
+    token = db_session.query(GameToken).filter_by(table_link=table_link, owner_name=player_name, is_active=True).first()
+    db_session.close()
     
     if token and token.character_id:
         try:
             runtime = runtime_manager.create_runtime(token.character_id, player_id, table_link)
+            if session:
+                session.add_runtime(runtime)
             await websocket.send_text(json.dumps({
                 "type": "runtime_created",
                 "runtime": runtime.to_dict()
@@ -1296,7 +2275,10 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                 "message": f"Ошибка создания Runtime: {e}"
             }))
     
-    await websocket.send_text(json.dumps({"type": "system", "text": f"Добро пожаловать в игру {table_link}, {player_name}!"}))
+    await websocket.send_text(json.dumps({
+        "type": "system",
+        "text": f"Добро пожаловать в игру {table_link}, {player_name}!"
+    }))
     
     try:
         while True:
@@ -1304,13 +2286,13 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
             try:
                 msg = json.loads(data)
                 if msg.get('type') == 'move':
-                    session = Session()
-                    token = session.query(GameToken).filter_by(id=msg['token_id'], table_link=table_link).first()
+                    db_session = Session()
+                    token = db_session.query(GameToken).filter_by(id=msg['token_id'], table_link=table_link).first()
                     if token:
                         token.x = msg['x']
                         token.y = msg['y']
-                        session.commit()
-                    session.close()
+                        db_session.commit()
+                    db_session.close()
                     for ws in connections.get(table_link, []):
                         try:
                             if ws != websocket:
@@ -1323,6 +2305,37 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                             await ws.send_text(json.dumps({'type': 'chat', 'sender': player_name, 'text': msg['text']}))
                         except:
                             pass
+                elif msg.get('type') == 'combat_action':
+                    # Обработка боевого действия через WebSocket
+                    source_runtime_id = msg.get('source_runtime_id')
+                    target_runtime_id = msg.get('target_runtime_id')
+                    ability_id = msg.get('ability_id')
+                    
+                    if source_runtime_id and target_runtime_id and ability_id:
+                        source_runtime = runtime_manager.get_runtime(source_runtime_id)
+                        target_runtime = runtime_manager.get_runtime(target_runtime_id)
+                        
+                        if source_runtime and target_runtime:
+                            result = CombatEngine.resolve_action(
+                                source_runtime,
+                                target_runtime,
+                                ability_id,
+                                table_link
+                            )
+                            
+                            # Отправляем результат всем
+                            for ws in connections.get(table_link, []):
+                                try:
+                                    await ws.send_text(json.dumps({
+                                        'type': 'combat_result',
+                                        'result': result
+                                    }))
+                                except:
+                                    pass
+                            
+                            # Сохраняем изменения
+                            runtime_manager.save_runtime_to_character(source_runtime_id)
+                            runtime_manager.save_runtime_to_character(target_runtime_id)
             except json.JSONDecodeError:
                 for ws in connections.get(table_link, []):
                     try:
@@ -1334,6 +2347,10 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
             connections[table_link].remove(websocket)
             if not connections[table_link]:
                 del connections[table_link]
+
+# ============================================================
+# 16. ЗАПУСК
+# ============================================================
 
 if __name__ == "__main__":
     import uvicorn
