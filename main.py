@@ -33,38 +33,35 @@ class RoomState(str, Enum):
     PAUSED = "paused"
     FINISHED = "finished"
 
-class SkillType(str, Enum):
-    ACTIVE = "active"
-    PASSIVE = "passive"
-    REACTION = "reaction"
-    CONTEXTUAL = "contextual"
+class InventoryEventType(str, Enum):
+    ITEM_ADDED = "item_added"
+    ITEM_REMOVED = "item_removed"
+    ITEM_MOVED = "item_moved"
+    ITEM_USED = "item_used"
+    ITEM_DROPPED = "item_dropped"
+    ITEM_TRANSFERRED = "item_transferred"
+    INVENTORY_OPENED = "inventory_opened"
+    INVENTORY_CLOSED = "inventory_closed"
+    STACK_SPLIT = "stack_split"
+    STACK_MERGED = "stack_merged"
+    EQUIPMENT_CHANGED = "equipment_changed"
+    LOOT_ADDED = "loot_added"
+    LOOT_REMOVED = "loot_removed"
 
-class TargetType(str, Enum):
-    NONE = "none"
-    SINGLE = "single"
-    MULTIPLE = "multiple"
-    AREA = "area"
-    SELF = "self"
-    ANY_OBJECT = "any_object"
-    POSITION = "position"
-
-class CooldownType(str, Enum):
-    TURNS = "turns"
-    ROUNDS = "rounds"
-    TIME = "time"
-    UNTIL_END_OF_SCENE = "until_end_of_scene"
-    UNTIL_REST = "until_rest"
-    NONE = "none"
-
-class SkillEventType(str, Enum):
-    SKILL_ACTIVATED = "skill_activated"
-    SKILL_CANCELLED = "skill_cancelled"
-    SKILL_ON_COOLDOWN = "skill_on_cooldown"
-    SKILL_FINISHED = "skill_finished"
-    SKILL_INTERRUPTED = "skill_interrupted"
-    SKILL_UNLOCKED = "skill_unlocked"
-    SKILL_REMOVED = "skill_removed"
-    SKILL_AVAILABLE = "skill_available"
+class EquipmentSlot(str, Enum):
+    HEAD = "head"
+    BODY = "body"
+    LEGS = "legs"
+    HANDS = "hands"
+    FEET = "feet"
+    RING_1 = "ring_1"
+    RING_2 = "ring_2"
+    NECK = "neck"
+    MAIN_HAND = "main_hand"
+    OFF_HAND = "off_hand"
+    BACK = "back"
+    ACCESSORY = "accessory"
+    CUSTOM = "custom"
 
 # ============================================================
 # 2. БАЗА ДАННЫХ
@@ -108,6 +105,8 @@ class Character(Base):
     inventory = Column(JSON, default='[]')
     equipment = Column(JSON, default='{}')
     effects = Column(JSON, default='[]')
+    max_weight = Column(Float, default=100.0)
+    max_slots = Column(Integer, default=50)
     player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     room_id = Column(Integer, ForeignKey('game_rooms.id'), nullable=True)
     is_npc = Column(Boolean, default=False)
@@ -187,38 +186,29 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. SKILL SYSTEM
+# 3. INVENTORY SYSTEM (ФИНАЛЬНАЯ ВЕРСИЯ)
 # ============================================================
 
 @dataclass
-class Skill:
-    """Универсальная способность."""
+class InventoryItem:
+    """Универсальный предмет инвентаря. Не зависит от сеттинга."""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ''
     description: str = ''
     icon: str = ''
-    category: str = 'Active'
-    skill_type: SkillType = SkillType.ACTIVE
-    
-    # Игровые параметры
-    action_id: str = ''  # ID действия в Action System
-    cooldown_type: CooldownType = CooldownType.NONE
-    cooldown_value: int = 0
-    charges: int = 0
-    max_charges: int = 0
-    resource_cost: Dict[str, int] = field(default_factory=dict)  # {"mana": 10, "stamina": 5}
-    range: float = 0.0
-    target_type: TargetType = TargetType.SINGLE
+    type: str = 'misc'  # weapon, armor, consumable, tool, key, quest, container, misc, currency, document, artifact, ammo, spellbook, ingredient, custom
+    weight: float = 0.0
+    rarity: str = 'common'  # common, uncommon, rare, epic, legendary, artifact, custom
+    stackable: bool = True
+    quantity: int = 1
+    max_quantity: int = 999
+    actions: List[str] = field(default_factory=list)  # use, equip, drink, read, shoot, etc.
+    effects: List[Dict] = field(default_factory=list)  # [{"type": "damage", "value": "2d6"}, {"type": "heal", "value": "1d8"}]
     tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    # Контекстные условия
-    context_condition: str = ''  # JSON-условие для контекстных способностей
-    
-    # Визуал
-    animation: str = ''
-    sound: str = ''
-    color: str = '#c7a252'
+    metadata: Dict[str, Any] = field(default_factory=dict)  # {"damage": "2d6", "range": 6, "ammo": 5}
+    container_id: str = ''  # Для вложенных контейнеров
+    position: int = 0  # Порядок в инвентаре
+    equipped_slot: Optional[str] = None  # Если предмет экипирован
     
     def to_dict(self) -> dict:
         return {
@@ -226,302 +216,468 @@ class Skill:
             'name': self.name,
             'description': self.description,
             'icon': self.icon,
-            'category': self.category,
-            'skill_type': self.skill_type.value,
-            'action_id': self.action_id,
-            'cooldown_type': self.cooldown_type.value,
-            'cooldown_value': self.cooldown_value,
-            'charges': self.charges,
-            'max_charges': self.max_charges,
-            'resource_cost': self.resource_cost,
-            'range': self.range,
-            'target_type': self.target_type.value,
+            'type': self.type,
+            'weight': self.weight,
+            'rarity': self.rarity,
+            'stackable': self.stackable,
+            'quantity': self.quantity,
+            'max_quantity': self.max_quantity,
+            'actions': self.actions,
+            'effects': self.effects,
             'tags': self.tags,
             'metadata': self.metadata,
-            'context_condition': self.context_condition,
-            'animation': self.animation,
-            'sound': self.sound,
-            'color': self.color
+            'container_id': self.container_id,
+            'position': self.position,
+            'equipped_slot': self.equipped_slot
         }
     
-    def is_available(self, character: 'Character', cooldown_tracker: Dict[str, int]) -> bool:
-        """Проверяет, доступна ли способность."""
-        # Проверяем кулдаун
-        if self.cooldown_type != CooldownType.NONE:
-            remaining = cooldown_tracker.get(self.id, 0)
-            if remaining > 0:
-                return False
-        
-        # Проверяем заряды
-        if self.max_charges > 0 and self.charges <= 0:
+    @classmethod
+    def from_dict(cls, data: dict) -> 'InventoryItem':
+        return cls(
+            id=data.get('id', str(uuid.uuid4())),
+            name=data.get('name', ''),
+            description=data.get('description', ''),
+            icon=data.get('icon', ''),
+            type=data.get('type', 'misc'),
+            weight=data.get('weight', 0.0),
+            rarity=data.get('rarity', 'common'),
+            stackable=data.get('stackable', True),
+            quantity=data.get('quantity', 1),
+            max_quantity=data.get('max_quantity', 999),
+            actions=data.get('actions', []),
+            effects=data.get('effects', []),
+            tags=data.get('tags', []),
+            metadata=data.get('metadata', {}),
+            container_id=data.get('container_id', ''),
+            position=data.get('position', 0),
+            equipped_slot=data.get('equipped_slot')
+        )
+    
+    def can_stack_with(self, other: 'InventoryItem') -> bool:
+        """Проверяет, можно ли объединить предметы."""
+        if not self.stackable or not other.stackable:
             return False
-        
-        # Проверяем ресурсы
-        stats = json.loads(character.stats) if character.stats else {}
-        for resource, cost in self.resource_cost.items():
-            current = stats.get(resource, 0)
-            if current < cost:
-                return False
-        
+        if self.name != other.name:
+            return False
+        if self.type != other.type:
+            return False
+        if self.metadata != other.metadata:
+            return False
         return True
     
-    def get_cooldown_remaining(self, cooldown_tracker: Dict[str, int]) -> int:
-        """Возвращает оставшееся время кулдауна."""
-        return cooldown_tracker.get(self.id, 0)
+    def stack_with(self, other: 'InventoryItem') -> int:
+        """Объединяет предметы. Возвращает количество перенесённых предметов."""
+        if not self.can_stack_with(other):
+            return 0
+        space = self.max_quantity - self.quantity
+        transfer = min(space, other.quantity)
+        self.quantity += transfer
+        other.quantity -= transfer
+        return transfer
+    
+    def get_total_weight(self) -> float:
+        """Возвращает общий вес предмета (вес * количество)."""
+        return self.weight * self.quantity
 
 
-class SkillBar:
-    """Панель способностей персонажа."""
+class Inventory:
+    """
+    Универсальный инвентарь. Не зависит от сеттинга.
+    Только хранение и управление предметами.
+    """
     
-    def __init__(self, character_id: int):
-        self.character_id = character_id
-        self._skills: Dict[str, Skill] = {}
-        self._cooldowns: Dict[str, int] = {}  # skill_id -> remaining_turns
-        self._slot_order: List[str] = []  # порядок слотов
+    def __init__(self, owner_id: int = 0, owner_type: str = 'character'):
+        self.owner_id = owner_id
+        self.owner_type = owner_type
+        self._items: Dict[str, InventoryItem] = {}
+        self._container_items: Dict[str, List[str]] = {}  # container_id -> [item_ids]
+        self._equipped_items: Dict[str, str] = {}  # slot -> item_id
+        self._event_listeners: Dict[InventoryEventType, List[Callable]] = {}
     
-    def add_skill(self, skill: Skill, slot: int = None) -> bool:
-        """Добавляет способность на панель."""
-        if skill.id in self._skills:
+    # ===== УПРАВЛЕНИЕ ПРЕДМЕТАМИ =====
+    
+    def add_item(self, item: InventoryItem, container_id: str = '') -> bool:
+        """Добавляет предмет в инвентарь."""
+        # Проверяем лимит веса
+        if self.get_total_weight() + item.get_total_weight() > self.get_max_weight():
+            self._publish_event(InventoryEventType.ITEM_ADDED, item, {'error': 'weight_limit_exceeded'})
             return False
         
-        self._skills[skill.id] = skill
-        if slot is not None:
-            self._slot_order.insert(slot, skill.id)
-        else:
-            self._slot_order.append(skill.id)
-        return True
-    
-    def remove_skill(self, skill_id: str) -> bool:
-        """Удаляет способность с панели."""
-        if skill_id not in self._skills:
+        # Проверяем лимит слотов
+        if len(self._items) >= self.get_max_slots():
+            self._publish_event(InventoryEventType.ITEM_ADDED, item, {'error': 'slot_limit_exceeded'})
             return False
         
-        del self._skills[skill_id]
-        if skill_id in self._slot_order:
-            self._slot_order.remove(skill_id)
+        # Проверяем, можно ли добавить в стек
+        if item.stackable:
+            for existing in self._items.values():
+                if existing.can_stack_with(item) and existing.container_id == container_id:
+                    existing.quantity += item.quantity
+                    self._publish_event(InventoryEventType.ITEM_ADDED, item)
+                    return True
+        
+        # Добавляем новый предмет
+        item.container_id = container_id
+        item.position = len(self._items)
+        self._items[item.id] = item
+        
+        if container_id:
+            if container_id not in self._container_items:
+                self._container_items[container_id] = []
+            self._container_items[container_id].append(item.id)
+        
+        self._publish_event(InventoryEventType.ITEM_ADDED, item)
         return True
     
-    def get_skill(self, skill_id: str) -> Optional[Skill]:
-        """Получает способность по ID."""
-        return self._skills.get(skill_id)
-    
-    def get_all_skills(self) -> List[Skill]:
-        """Получает все способности в порядке слотов."""
-        ordered = []
-        for skill_id in self._slot_order:
-            if skill_id in self._skills:
-                ordered.append(self._skills[skill_id])
-        return ordered
-    
-    def get_available_skills(self, character: Character) -> List[Skill]:
-        """Получает доступные способности."""
-        return [
-            skill for skill in self.get_all_skills()
-            if skill.is_available(character, self._cooldowns)
-        ]
-    
-    def get_skills_by_category(self, category: str) -> List[Skill]:
-        """Получает способности по категории."""
-        return [s for s in self._skills.values() if s.category == category]
-    
-    def get_skills_by_type(self, skill_type: SkillType) -> List[Skill]:
-        """Получает способности по типу."""
-        return [s for s in self._skills.values() if s.skill_type == skill_type]
-    
-    def get_contextual_skills(self, context: Dict) -> List[Skill]:
-        """Получает контекстные способности."""
-        result = []
-        for skill in self._skills.values():
-            if skill.skill_type == SkillType.CONTEXTUAL:
-                # Простая проверка контекста (можно расширить)
-                if skill.context_condition:
-                    try:
-                        condition = json.loads(skill.context_condition)
-                        if self._check_context(condition, context):
-                            result.append(skill)
-                    except:
-                        pass
-        return result
-    
-    def _check_context(self, condition: Dict, context: Dict) -> bool:
-        """Проверяет условие контекста."""
-        # Простая реализация — можно расширить
-        for key, value in condition.items():
-            if context.get(key) != value:
-                return False
-        return True
-    
-    def use_skill(self, skill_id: str, character: Character) -> bool:
-        """Использует способность."""
-        skill = self._skills.get(skill_id)
-        if not skill:
-            return False
+    def remove_item(self, item_id: str, quantity: int = None) -> Optional[InventoryItem]:
+        """Удаляет предмет из инвентаря."""
+        item = self._items.get(item_id)
+        if not item:
+            return None
         
-        if not skill.is_available(character, self._cooldowns):
-            return False
+        # Если предмет экипирован, снимаем его
+        if item.equipped_slot:
+            self.unequip_item(item_id)
         
-        # Устанавливаем кулдаун
-        if skill.cooldown_type != CooldownType.NONE:
-            self._cooldowns[skill_id] = skill.cooldown_value
-        
-        # Тратим заряды
-        if skill.max_charges > 0:
-            skill.charges -= 1
-        
-        return True
-    
-    def tick_cooldowns(self):
-        """Обновляет кулдауны (уменьшает на 1)."""
-        for skill_id in list(self._cooldowns.keys()):
-            self._cooldowns[skill_id] -= 1
-            if self._cooldowns[skill_id] <= 0:
-                del self._cooldowns[skill_id]
-    
-    def to_dict(self, character: Character = None) -> dict:
-        """Преобразует панель в словарь."""
-        result = {
-            'skills': [s.to_dict() for s in self.get_all_skills()],
-            'cooldowns': self._cooldowns.copy()
-        }
-        
-        if character:
-            result['available'] = [
-                s.id for s in self.get_available_skills(character)
-            ]
-        
-        return result
-    
-    def load_from_character(self, character: Character):
-        """Загружает способности из Character."""
-        skills_data = json.loads(character.skills) if character.skills else []
-        for skill_data in skills_data:
-            skill = Skill(
-                id=skill_data.get('id', str(uuid.uuid4())),
-                name=skill_data.get('name', ''),
-                description=skill_data.get('description', ''),
-                icon=skill_data.get('icon', ''),
-                category=skill_data.get('category', 'Active'),
-                skill_type=SkillType(skill_data.get('skill_type', 'active')),
-                action_id=skill_data.get('action_id', ''),
-                cooldown_type=CooldownType(skill_data.get('cooldown_type', 'none')),
-                cooldown_value=skill_data.get('cooldown_value', 0),
-                charges=skill_data.get('charges', 0),
-                max_charges=skill_data.get('max_charges', 0),
-                resource_cost=skill_data.get('resource_cost', {}),
-                range=skill_data.get('range', 0.0),
-                target_type=TargetType(skill_data.get('target_type', 'single')),
-                tags=skill_data.get('tags', []),
-                metadata=skill_data.get('metadata', {}),
-                context_condition=skill_data.get('context_condition', ''),
-                animation=skill_data.get('animation', ''),
-                sound=skill_data.get('sound', ''),
-                color=skill_data.get('color', '#c7a252')
+        if quantity is not None and quantity < item.quantity:
+            # Удаляем часть стека
+            removed = InventoryItem(
+                name=item.name,
+                description=item.description,
+                icon=item.icon,
+                type=item.type,
+                weight=item.weight,
+                rarity=item.rarity,
+                stackable=item.stackable,
+                quantity=quantity,
+                max_quantity=item.max_quantity,
+                actions=item.actions.copy(),
+                effects=item.effects.copy(),
+                tags=item.tags.copy(),
+                metadata=item.metadata.copy()
             )
-            self.add_skill(skill)
+            item.quantity -= quantity
+            self._publish_event(InventoryEventType.ITEM_REMOVED, removed)
+            return removed
+        else:
+            # Удаляем весь предмет
+            if item.container_id in self._container_items:
+                if item.id in self._container_items[item.container_id]:
+                    self._container_items[item.container_id].remove(item.id)
+            
+            del self._items[item_id]
+            self._publish_event(InventoryEventType.ITEM_REMOVED, item)
+            return item
     
-    def save_to_character(self, character: Character):
-        """Сохраняет способности в Character."""
-        character.skills = json.dumps([s.to_dict() for s in self.get_all_skills()])
-
-
-class SkillManager:
-    """Управляет панелями способностей всех персонажей."""
+    def get_item(self, item_id: str) -> Optional[InventoryItem]:
+        """Получает предмет по ID."""
+        return self._items.get(item_id)
     
-    def __init__(self):
-        self._bars: Dict[int, SkillBar] = {}  # character_id -> SkillBar
-        self._event_listeners: Dict[SkillEventType, List[Callable]] = {}
+    def get_items(self, container_id: str = '') -> List[InventoryItem]:
+        """Получает все предметы в контейнере."""
+        if container_id:
+            item_ids = self._container_items.get(container_id, [])
+            return [self._items[iid] for iid in item_ids if iid in self._items]
+        return list(self._items.values())
     
-    def get_skill_bar(self, character_id: int) -> Optional[SkillBar]:
-        """Получает панель способностей персонажа."""
-        return self._bars.get(character_id)
+    def get_all_items(self) -> List[InventoryItem]:
+        """Получает все предметы."""
+        return list(self._items.values())
     
-    def load_skill_bar(self, character: Character) -> SkillBar:
-        """Загружает панель способностей персонажа."""
-        bar = SkillBar(character.id)
-        bar.load_from_character(character)
-        self._bars[character.id] = bar
-        return bar
+    # ===== ЭКИПИРОВКА =====
     
-    def save_skill_bar(self, character: Character) -> bool:
-        """Сохраняет панель способностей персонажа."""
-        bar = self._bars.get(character.id)
-        if not bar:
+    def equip_item(self, item_id: str, slot: str) -> bool:
+        """Экипирует предмет в указанный слот."""
+        item = self._items.get(item_id)
+        if not item:
             return False
-        bar.save_to_character(character)
+        
+        # Проверяем, что предмет можно экипировать
+        if 'equip' not in item.actions:
+            return False
+        
+        # Если слот занят, снимаем старый предмет
+        if slot in self._equipped_items:
+            old_item_id = self._equipped_items[slot]
+            old_item = self._items.get(old_item_id)
+            if old_item:
+                old_item.equipped_slot = None
+        
+        # Экипируем новый предмет
+        item.equipped_slot = slot
+        self._equipped_items[slot] = item_id
+        
+        self._publish_event(InventoryEventType.EQUIPMENT_CHANGED, item)
         return True
     
-    def add_skill_to_character(self, character: Character, skill_data: dict) -> bool:
-        """Добавляет способность персонажу."""
-        bar = self.get_skill_bar(character.id)
-        if not bar:
-            bar = self.load_skill_bar(character)
+    def unequip_item(self, item_id: str) -> bool:
+        """Снимает предмет с экипировки."""
+        item = self._items.get(item_id)
+        if not item or not item.equipped_slot:
+            return False
         
-        skill = Skill(**skill_data)
-        success = bar.add_skill(skill)
+        slot = item.equipped_slot
+        if slot in self._equipped_items:
+            del self._equipped_items[slot]
+        
+        item.equipped_slot = None
+        self._publish_event(InventoryEventType.EQUIPMENT_CHANGED, item)
+        return True
+    
+    def get_equipped_items(self) -> Dict[str, InventoryItem]:
+        """Получает все экипированные предметы."""
+        result = {}
+        for slot, item_id in self._equipped_items.items():
+            item = self._items.get(item_id)
+            if item:
+                result[slot] = item
+        return result
+    
+    # ===== ВЕС И ЛИМИТЫ =====
+    
+    def get_total_weight(self) -> float:
+        """Вычисляет общий вес инвентаря."""
+        return sum(item.get_total_weight() for item in self._items.values())
+    
+    def get_max_weight(self) -> float:
+        """Возвращает максимальный вес (из Character)."""
+        return getattr(self, '_max_weight', 100.0)
+    
+    def get_max_slots(self) -> int:
+        """Возвращает максимальное количество слотов."""
+        return getattr(self, '_max_slots', 50)
+    
+    def set_limits(self, max_weight: float, max_slots: int):
+        """Устанавливает лимиты инвентаря."""
+        self._max_weight = max_weight
+        self._max_slots = max_slots
+    
+    # ===== ПЕРЕМЕЩЕНИЕ ПРЕДМЕТОВ =====
+    
+    def move_item(self, item_id: str, target_container_id: str) -> bool:
+        """Перемещает предмет в другой контейнер."""
+        item = self._items.get(item_id)
+        if not item:
+            return False
+        
+        # Удаляем из старого контейнера
+        if item.container_id in self._container_items:
+            if item.id in self._container_items[item.container_id]:
+                self._container_items[item.container_id].remove(item.id)
+        
+        # Добавляем в новый контейнер
+        item.container_id = target_container_id
+        if target_container_id:
+            if target_container_id not in self._container_items:
+                self._container_items[target_container_id] = []
+            self._container_items[target_container_id].append(item.id)
+        
+        self._publish_event(InventoryEventType.ITEM_MOVED, item)
+        return True
+    
+    def transfer_item(self, item_id: str, target_inventory: 'Inventory', quantity: int = None) -> bool:
+        """Передаёт предмет другому инвентарю."""
+        item = self.remove_item(item_id, quantity)
+        if not item:
+            return False
+        
+        success = target_inventory.add_item(item)
         if success:
-            self.save_skill_bar(character)
-            self._publish_event(SkillEventType.SKILL_UNLOCKED, skill)
+            self._publish_event(InventoryEventType.ITEM_TRANSFERRED, item)
+        else:
+            # Возвращаем предмет обратно
+            self.add_item(item)
+        
         return success
     
-    def remove_skill_from_character(self, character: Character, skill_id: str) -> bool:
-        """Удаляет способность у персонажа."""
-        bar = self.get_skill_bar(character.id)
-        if not bar:
-            return False
-        
-        skill = bar.get_skill(skill_id)
-        success = bar.remove_skill(skill_id)
-        if success and skill:
-            self.save_skill_bar(character)
-            self._publish_event(SkillEventType.SKILL_REMOVED, skill)
-        return success
+    def drop_item(self, item_id: str, quantity: int = None) -> Optional[InventoryItem]:
+        """Выбрасывает предмет."""
+        item = self.remove_item(item_id, quantity)
+        if item:
+            self._publish_event(InventoryEventType.ITEM_DROPPED, item)
+        return item
     
-    def use_skill(self, character: Character, skill_id: str, target: Any = None) -> bool:
-        """Использует способность."""
-        bar = self.get_skill_bar(character.id)
-        if not bar:
-            return False
-        
-        skill = bar.get_skill(skill_id)
-        if not skill:
-            return False
-        
-        if not bar.use_skill(skill_id, character):
-            self._publish_event(SkillEventType.SKILL_ON_COOLDOWN, skill)
-            return False
-        
-        self.save_skill_bar(character)
-        self._publish_event(SkillEventType.SKILL_ACTIVATED, skill)
-        
-        # Здесь вызывается Game Action System
-        # TODO: Интеграция с Game Action System
-        return True
+    # ===== ПОИСК И ФИЛЬТРАЦИЯ =====
     
-    def tick_cooldowns(self, character_id: int):
-        """Обновляет кулдауны персонажа."""
-        bar = self._bars.get(character_id)
-        if bar:
-            bar.tick_cooldowns()
+    def find_by_name(self, name: str) -> List[InventoryItem]:
+        """Ищет предметы по имени."""
+        name_lower = name.lower()
+        return [item for item in self._items.values() if name_lower in item.name.lower()]
     
-    def subscribe(self, event_type: SkillEventType, callback: Callable):
-        """Подписывается на события."""
+    def find_by_type(self, type_name: str) -> List[InventoryItem]:
+        """Ищет предметы по типу."""
+        return [item for item in self._items.values() if item.type == type_name]
+    
+    def find_by_tag(self, tag: str) -> List[InventoryItem]:
+        """Ищет предметы по тегу."""
+        return [item for item in self._items.values() if tag in item.tags]
+    
+    def find_by_action(self, action: str) -> List[InventoryItem]:
+        """Ищет предметы по действию."""
+        return [item for item in self._items.values() if action in item.actions]
+    
+    def filter_by_rarity(self, rarity: str) -> List[InventoryItem]:
+        """Фильтрует по редкости."""
+        return [item for item in self._items.values() if item.rarity == rarity]
+    
+    # ===== СОБЫТИЯ =====
+    
+    def subscribe(self, event_type: InventoryEventType, callback: Callable):
+        """Подписывается на события инвентаря."""
         if event_type not in self._event_listeners:
             self._event_listeners[event_type] = []
         self._event_listeners[event_type].append(callback)
     
-    def _publish_event(self, event_type: SkillEventType, skill: Skill):
+    def _publish_event(self, event_type: InventoryEventType, item: InventoryItem, extra: dict = None):
         """Публикует событие."""
         if event_type in self._event_listeners:
             for callback in self._event_listeners[event_type]:
                 try:
-                    callback(event_type, skill)
+                    callback(event_type, item, extra or {})
                 except Exception as e:
-                    print(f"Error in skill event callback: {e}")
+                    print(f"Error in inventory event callback: {e}")
+    
+    # ===== СЕРИАЛИЗАЦИЯ =====
+    
+    def to_dict(self) -> dict:
+        """Преобразует инвентарь в словарь для JSON."""
+        return {
+            'owner_id': self.owner_id,
+            'owner_type': self.owner_type,
+            'items': [item.to_dict() for item in self._items.values()],
+            'equipped': {slot: item_id for slot, item_id in self._equipped_items.items()},
+            'total_weight': self.get_total_weight(),
+            'max_weight': self.get_max_weight(),
+            'max_slots': self.get_max_slots(),
+            'item_count': len(self._items)
+        }
+    
+    def load_from_dict(self, data: dict):
+        """Загружает инвентарь из словаря."""
+        self._items = {}
+        self._container_items = {}
+        self._equipped_items = {}
+        
+        for item_data in data.get('items', []):
+            item = InventoryItem.from_dict(item_data)
+            self._items[item.id] = item
+            if item.container_id:
+                if item.container_id not in self._container_items:
+                    self._container_items[item.container_id] = []
+                self._container_items[item.container_id].append(item.id)
+            if item.equipped_slot:
+                self._equipped_items[item.equipped_slot] = item.id
+        
+        self.set_limits(
+            data.get('max_weight', 100.0),
+            data.get('max_slots', 50)
+        )
 
-skill_manager = SkillManager()
 
 # ============================================================
-# 4. МИГРАЦИЯ
+# 4. INVENTORY MANAGER
+# ============================================================
+
+class InventoryManager:
+    """Управляет инвентарями всех персонажей."""
+    
+    def __init__(self):
+        self._inventories: Dict[int, Inventory] = {}  # character_id -> Inventory
+    
+    def get_inventory(self, character_id: int) -> Optional[Inventory]:
+        """Получает инвентарь персонажа."""
+        return self._inventories.get(character_id)
+    
+    def load_inventory(self, character: Character) -> Inventory:
+        """Загружает инвентарь персонажа."""
+        inventory = Inventory(owner_id=character.id, owner_type='character')
+        inventory.set_limits(character.max_weight, character.max_slots)
+        
+        if character.inventory:
+            inventory_data = json.loads(character.inventory)
+            inventory.load_from_dict(inventory_data)
+        
+        self._inventories[character.id] = inventory
+        return inventory
+    
+    def save_inventory(self, character: Character) -> bool:
+        """Сохраняет инвентарь персонажа."""
+        inventory = self._inventories.get(character.id)
+        if not inventory:
+            return False
+        character.inventory = json.dumps(inventory.to_dict())
+        return True
+    
+    def add_item(self, character: Character, item_data: dict) -> bool:
+        """Добавляет предмет персонажу."""
+        inventory = self.get_inventory(character.id)
+        if not inventory:
+            inventory = self.load_inventory(character)
+        
+        item = InventoryItem.from_dict(item_data)
+        success = inventory.add_item(item)
+        if success:
+            self.save_inventory(character)
+        return success
+    
+    def remove_item(self, character: Character, item_id: str, quantity: int = None) -> bool:
+        """Удаляет предмет у персонажа."""
+        inventory = self.get_inventory(character.id)
+        if not inventory:
+            return False
+        
+        item = inventory.remove_item(item_id, quantity)
+        if item:
+            self.save_inventory(character)
+            return True
+        return False
+    
+    def transfer_item(self, source: Character, target: Character, item_id: str, quantity: int = None) -> bool:
+        """Передаёт предмет между персонажами."""
+        source_inv = self.get_inventory(source.id)
+        target_inv = self.get_inventory(target.id)
+        
+        if not source_inv:
+            source_inv = self.load_inventory(source)
+        if not target_inv:
+            target_inv = self.load_inventory(target)
+        
+        item = source_inv.get_item(item_id)
+        if not item:
+            return False
+        
+        success = source_inv.transfer_item(item_id, target_inv, quantity)
+        if success:
+            self.save_inventory(source)
+            self.save_inventory(target)
+        return success
+    
+    def equip_item(self, character: Character, item_id: str, slot: str) -> bool:
+        """Экипирует предмет."""
+        inventory = self.get_inventory(character.id)
+        if not inventory:
+            return False
+        
+        success = inventory.equip_item(item_id, slot)
+        if success:
+            self.save_inventory(character)
+        return success
+    
+    def unequip_item(self, character: Character, item_id: str) -> bool:
+        """Снимает предмет с экипировки."""
+        inventory = self.get_inventory(character.id)
+        if not inventory:
+            return False
+        
+        success = inventory.unequip_item(item_id)
+        if success:
+            self.save_inventory(character)
+        return success
+
+inventory_manager = InventoryManager()
+
+# ============================================================
+# 5. МИГРАЦИЯ
 # ============================================================
 
 def migrate_database():
@@ -546,7 +702,7 @@ Base.metadata.create_all(engine)
 migrate_database()
 
 # ============================================================
-# 5. FASTAPI
+# 6. FASTAPI
 # ============================================================
 
 app = FastAPI()
@@ -561,7 +717,7 @@ os.makedirs(MAP_DIR, exist_ok=True)
 connections = {}
 
 # ============================================================
-# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================
 
 def hash_password(password):
@@ -607,40 +763,40 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 7. API: SKILL SYSTEM
+# 8. API: INVENTORY
 # ============================================================
 
-@app.post("/api/skill/load/{character_id}")
-async def load_skills(character_id: int):
-    """Загружает способности персонажа."""
+@app.post("/api/inventory/load/{character_id}")
+async def load_inventory(character_id: int):
+    """Загружает инвентарь персонажа."""
     session = Session()
     try:
         character = session.query(Character).filter_by(id=character_id).first()
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        bar = skill_manager.load_skill_bar(character)
+        inventory = inventory_manager.load_inventory(character)
         return {
             'success': True,
-            'skills': bar.to_dict(character)
+            'inventory': inventory.to_dict()
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.post("/api/skill/add")
-async def add_skill(request: Request, data: dict):
-    """Добавляет способность персонажу."""
+@app.post("/api/inventory/add")
+async def add_item(request: Request, data: dict):
+    """Добавляет предмет персонажу."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
     character_id = data.get('character_id')
-    skill_data = data.get('skill')
+    item_data = data.get('item')
     
-    if not character_id or not skill_data:
-        return {"success": False, "message": "Не указаны character_id или skill"}
+    if not character_id or not item_data:
+        return {"success": False, "message": "Не указаны character_id или item"}
     
     session = Session()
     try:
@@ -648,30 +804,31 @@ async def add_skill(request: Request, data: dict):
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        success = skill_manager.add_skill_to_character(character, skill_data)
+        success = inventory_manager.add_item(character, item_data)
         session.commit()
         
         if success:
-            return {'success': True, 'message': 'Способность добавлена'}
-        return {"success": False, "message": "Не удалось добавить способность"}
+            return {'success': True, 'message': 'Предмет добавлен'}
+        return {"success": False, "message": "Не удалось добавить предмет"}
     except Exception as e:
         session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.post("/api/skill/remove")
-async def remove_skill(request: Request, data: dict):
-    """Удаляет способность у персонажа."""
+@app.post("/api/inventory/remove")
+async def remove_item(request: Request, data: dict):
+    """Удаляет предмет у персонажа."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
     character_id = data.get('character_id')
-    skill_id = data.get('skill_id')
+    item_id = data.get('item_id')
+    quantity = data.get('quantity')
     
-    if not character_id or not skill_id:
-        return {"success": False, "message": "Не указаны character_id или skill_id"}
+    if not character_id or not item_id:
+        return {"success": False, "message": "Не указаны character_id или item_id"}
     
     session = Session()
     try:
@@ -679,130 +836,192 @@ async def remove_skill(request: Request, data: dict):
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        success = skill_manager.remove_skill_from_character(character, skill_id)
+        success = inventory_manager.remove_item(character, item_id, quantity)
         session.commit()
         
         if success:
-            return {'success': True, 'message': 'Способность удалена'}
-        return {"success": False, "message": "Способность не найдена"}
+            return {'success': True, 'message': 'Предмет удалён'}
+        return {"success": False, "message": "Предмет не найден"}
     except Exception as e:
         session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.post("/api/skill/use")
-async def use_skill(request: Request, data: dict):
-    """Использует способность."""
+@app.post("/api/inventory/transfer")
+async def transfer_item(request: Request, data: dict):
+    """Передаёт предмет между персонажами."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    character_id = data.get('character_id')
-    skill_id = data.get('skill_id')
-    target = data.get('target')
+    source_id = data.get('source_id')
+    target_id = data.get('target_id')
+    item_id = data.get('item_id')
+    quantity = data.get('quantity')
     
-    if not character_id or not skill_id:
-        return {"success": False, "message": "Не указаны character_id или skill_id"}
+    if not source_id or not target_id or not item_id:
+        return {"success": False, "message": "Не указаны все параметры"}
     
     session = Session()
     try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
+        source = session.query(Character).filter_by(id=source_id).first()
+        target = session.query(Character).filter_by(id=target_id).first()
+        
+        if not source or not target:
             return {"success": False, "message": "Персонаж не найден"}
         
-        success = skill_manager.use_skill(character, skill_id, target)
+        success = inventory_manager.transfer_item(source, target, item_id, quantity)
         session.commit()
         
         if success:
-            return {
-                'success': True,
-                'message': 'Способность использована',
-                'skill_id': skill_id,
-                'target': target
-            }
-        return {"success": False, "message": "Не удалось использовать способность"}
+            return {'success': True, 'message': 'Предмет передан'}
+        return {"success": False, "message": "Не удалось передать предмет"}
     except Exception as e:
         session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.get("/api/skill/available/{character_id}")
-async def get_available_skills(character_id: int):
-    """Получает доступные способности персонажа."""
+@app.post("/api/inventory/equip")
+async def equip_item(request: Request, data: dict):
+    """Экипирует предмет."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    character_id = data.get('character_id')
+    item_id = data.get('item_id')
+    slot = data.get('slot')
+    
+    if not character_id or not item_id or not slot:
+        return {"success": False, "message": "Не указаны все параметры"}
+    
     session = Session()
     try:
         character = session.query(Character).filter_by(id=character_id).first()
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        bar = skill_manager.get_skill_bar(character_id)
-        if not bar:
-            bar = skill_manager.load_skill_bar(character)
+        success = inventory_manager.equip_item(character, item_id, slot)
+        session.commit()
         
-        available = bar.get_available_skills(character)
+        if success:
+            return {'success': True, 'message': 'Предмет экипирован'}
+        return {"success": False, "message": "Не удалось экипировать предмет"}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.post("/api/inventory/unequip")
+async def unequip_item(request: Request, data: dict):
+    """Снимает предмет с экипировки."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    character_id = data.get('character_id')
+    item_id = data.get('item_id')
+    
+    if not character_id or not item_id:
+        return {"success": False, "message": "Не указаны character_id или item_id"}
+    
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        success = inventory_manager.unequip_item(character, item_id)
+        session.commit()
+        
+        if success:
+            return {'success': True, 'message': 'Предмет снят'}
+        return {"success": False, "message": "Не удалось снять предмет"}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.get("/api/inventory/search")
+async def search_items(character_id: int, query: str):
+    """Ищет предметы в инвентаре."""
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        inventory = inventory_manager.get_inventory(character_id)
+        if not inventory:
+            inventory = inventory_manager.load_inventory(character)
+        
+        results = inventory.find_by_name(query)
         return {
             'success': True,
-            'skills': [s.to_dict() for s in available]
+            'results': [item.to_dict() for item in results]
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.get("/api/skill/contextual/{character_id}")
-async def get_contextual_skills(character_id: int, context: str = '{}'):
-    """Получает контекстные способности."""
+@app.get("/api/inventory/filter")
+async def filter_items(character_id: int, item_type: str = None, rarity: str = None):
+    """Фильтрует предметы по типу или редкости."""
     session = Session()
     try:
         character = session.query(Character).filter_by(id=character_id).first()
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        bar = skill_manager.get_skill_bar(character_id)
-        if not bar:
-            bar = skill_manager.load_skill_bar(character)
+        inventory = inventory_manager.get_inventory(character_id)
+        if not inventory:
+            inventory = inventory_manager.load_inventory(character)
         
-        try:
-            context_data = json.loads(context)
-        except:
-            context_data = {}
+        result = inventory.get_all_items()
+        if item_type:
+            result = [item for item in result if item.type == item_type]
+        if rarity:
+            result = [item for item in result if item.rarity == rarity]
         
-        contextual = bar.get_contextual_skills(context_data)
         return {
             'success': True,
-            'skills': [s.to_dict() for s in contextual]
+            'items': [item.to_dict() for item in result]
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.get("/api/skill/types")
-async def get_skill_types():
-    """Возвращает все типы способностей."""
-    return {
-        'success': True,
-        'types': [
-            {'value': t.value, 'label': t.value.title()}
-            for t in SkillType
-        ]
-    }
-
-@app.get("/api/skill/target_types")
-async def get_target_types():
-    """Возвращает все типы целей."""
-    return {
-        'success': True,
-        'types': [
-            {'value': t.value, 'label': t.value.replace('_', ' ').title()}
-            for t in TargetType
-        ]
-    }
+@app.get("/api/inventory/equipment/{character_id}")
+async def get_equipment(character_id: int):
+    """Получает экипированные предметы."""
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        inventory = inventory_manager.get_inventory(character_id)
+        if not inventory:
+            inventory = inventory_manager.load_inventory(character)
+        
+        equipped = inventory.get_equipped_items()
+        return {
+            'success': True,
+            'equipment': {slot: item.to_dict() for slot, item in equipped.items()}
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
 # ============================================================
-# 8. БЫСТРЫЙ СТАРТ
+# 9. БЫСТРЫЙ СТАРТ
 # ============================================================
 
 @app.get("/")
@@ -916,7 +1135,7 @@ async def room_page(request: Request, room_id: str):
     })
 
 # ============================================================
-# 9. WEBSOCKET
+# 10. WEBSOCKET
 # ============================================================
 
 @app.websocket("/ws/room/{room_id}")
@@ -951,24 +1170,58 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                         'timestamp': datetime.now().isoformat()
                     })
                 
-                elif msg_type == 'skill_use':
+                elif msg_type == 'inventory_add':
                     character_id = msg.get('character_id')
-                    skill_id = msg.get('skill_id')
-                    target = msg.get('target')
+                    item_data = msg.get('item')
                     
-                    if character_id and skill_id:
+                    if character_id and item_data:
                         session2 = Session()
                         character = session2.query(Character).filter_by(id=character_id).first()
                         if character:
-                            success = skill_manager.use_skill(character, skill_id, target)
+                            success = inventory_manager.add_item(character, item_data)
                             if success:
                                 session2.commit()
                                 await broadcast_to_room(room.id, {
-                                    'type': 'skill_used',
+                                    'type': 'inventory_updated',
                                     'character_id': character_id,
-                                    'skill_id': skill_id,
-                                    'target': target,
-                                    'timestamp': datetime.now().isoformat()
+                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
+                                })
+                        session2.close()
+                
+                elif msg_type == 'inventory_remove':
+                    character_id = msg.get('character_id')
+                    item_id = msg.get('item_id')
+                    
+                    if character_id and item_id:
+                        session2 = Session()
+                        character = session2.query(Character).filter_by(id=character_id).first()
+                        if character:
+                            success = inventory_manager.remove_item(character, item_id)
+                            if success:
+                                session2.commit()
+                                await broadcast_to_room(room.id, {
+                                    'type': 'inventory_updated',
+                                    'character_id': character_id,
+                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
+                                })
+                        session2.close()
+                
+                elif msg_type == 'inventory_equip':
+                    character_id = msg.get('character_id')
+                    item_id = msg.get('item_id')
+                    slot = msg.get('slot')
+                    
+                    if character_id and item_id and slot:
+                        session2 = Session()
+                        character = session2.query(Character).filter_by(id=character_id).first()
+                        if character:
+                            success = inventory_manager.equip_item(character, item_id, slot)
+                            if success:
+                                session2.commit()
+                                await broadcast_to_room(room.id, {
+                                    'type': 'inventory_updated',
+                                    'character_id': character_id,
+                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
                                 })
                         session2.close()
                 
@@ -991,7 +1244,7 @@ async def broadcast_to_room(room_id: int, message: dict):
             pass
 
 # ============================================================
-# 10. ЗАПУСК
+# 11. ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
