@@ -15,10 +15,6 @@ import math
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass, field
 
-# ============================================================
-# 1. БАЗА ДАННЫХ
-# ============================================================
-
 Base = declarative_base()
 engine = create_engine('sqlite:///dnd_game.db', connect_args={'check_same_thread': False})
 Session = sessionmaker(bind=engine)
@@ -58,11 +54,9 @@ class Character(Base):
     level = Column(Integer, default=1)
     experience = Column(Integer, default=0)
     max_hp = Column(Integer, default=20)
-    current_hp = Column(Integer, default=20)
-    temporary_hp = Column(Integer, default=0)
-    armor_class = Column(Integer, default=12)
-    initiative_bonus = Column(Integer, default=0)
+    base_ac = Column(Integer, default=12)
     speed = Column(Integer, default=30)
+    initiative_bonus = Column(Integer, default=0)
     strength = Column(Integer, default=10)
     dexterity = Column(Integer, default=10)
     constitution = Column(Integer, default=10)
@@ -75,11 +69,9 @@ class Character(Base):
     int_save = Column(Integer, default=0)
     wis_save = Column(Integer, default=0)
     cha_save = Column(Integer, default=0)
-    mana = Column(Integer, default=0)
-    energy = Column(Integer, default=0)
-    rage = Column(Integer, default=0)
-    luck = Column(Integer, default=0)
-    inspiration = Column(Boolean, default=False)
+    max_mana = Column(Integer, default=0)
+    max_energy = Column(Integer, default=0)
+    max_rage = Column(Integer, default=0)
     hit_dice = Column(String(10), default='1d8')
     height = Column(Float, default=0.0)
     weight = Column(Float, default=0.0)
@@ -93,6 +85,9 @@ class Character(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
     owner = relationship("User", foreign_keys=[created_by])
+    skills = relationship("CharacterSkill", back_populates="character", cascade="all, delete-orphan")
+    inventory = relationship("CharacterInventory", back_populates="character", cascade="all, delete-orphan")
+    effects = relationship("CharacterEffect", back_populates="character", cascade="all, delete-orphan")
 
 class CharacterSkill(Base):
     __tablename__ = 'character_skills'
@@ -102,7 +97,7 @@ class CharacterSkill(Base):
     is_prepared = Column(Boolean, default=False)
     is_enabled = Column(Boolean, default=True)
     cooldown = Column(Integer, default=0)
-    character = relationship("Character", backref="skills")
+    character = relationship("Character", back_populates="skills")
 
 class CharacterInventory(Base):
     __tablename__ = 'character_inventory'
@@ -111,7 +106,7 @@ class CharacterInventory(Base):
     item_id = Column(Integer)
     quantity = Column(Integer, default=1)
     equipped = Column(Boolean, default=False)
-    character = relationship("Character", backref="inventory")
+    character = relationship("Character", back_populates="inventory")
 
 class CharacterEffect(Base):
     __tablename__ = 'character_effects'
@@ -121,7 +116,7 @@ class CharacterEffect(Base):
     duration = Column(Integer, default=0)
     remaining_turns = Column(Integer, default=0)
     stacks = Column(Integer, default=1)
-    character = relationship("Character", backref="effects")
+    character = relationship("Character", back_populates="effects")
 
 class GameTable(Base):
     __tablename__ = 'game_tables'
@@ -203,21 +198,6 @@ class GameSession(Base):
     table = relationship("GameTable", foreign_keys=[table_link])
     logs = relationship("SessionLog", back_populates="session", cascade="all, delete-orphan")
 
-    def to_dict(self) -> dict:
-        return {
-            'id': self.id,
-            'session_id': self.session_id,
-            'name': self.name,
-            'gm_id': self.gm_id,
-            'table_link': self.table_link,
-            'state': self.state,
-            'current_round': self.current_round,
-            'current_turn': self.current_turn,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'finished_at': self.finished_at.isoformat() if self.finished_at else None
-        }
-
 class SessionLog(Base):
     __tablename__ = 'session_logs'
     id = Column(Integer, primary_key=True)
@@ -229,391 +209,25 @@ class SessionLog(Base):
     data = Column(Text, default='{}')
     session = relationship("GameSession", back_populates="logs")
 
-    def to_dict(self) -> dict:
-        return {
-            'id': self.id,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
-            'event_type': self.event_type,
-            'actor_id': self.actor_id,
-            'message': self.message,
-            'data': json.loads(self.data) if self.data else {}
-        }
-
-# ============================================================
-# 2. COMBAT ENGINE
-# ============================================================
-
-class CombatEngine:
-    """Универсальный боевой движок. Единственный источник истины."""
-    
-    # Словарь со всеми способностями
-    ABILITIES = {
-        'fireball': {
-            'id': 'fireball',
-            'name': 'Fireball',
-            'type': 'spell',
-            'range': 18,
-            'cost': {'action': 1, 'mana': 10},
-            'damage': {'dice': '8d6', 'type': 'fire'},
-            'save': {'ability': 'dex', 'dc': 15},
-            'effects': ['burn'],
-            'animation': 'fireball',
-            'sound': 'fireball.wav'
-        },
-        'sword_attack': {
-            'id': 'sword_attack',
-            'name': 'Sword Attack',
-            'type': 'attack',
-            'range': 1,
-            'cost': {'action': 1},
-            'damage': {'dice': '1d8+3', 'type': 'slashing'},
-            'save': None,
-            'effects': [],
-            'animation': 'slash',
-            'sound': 'sword.wav'
-        },
-        'heal': {
-            'id': 'heal',
-            'name': 'Heal',
-            'type': 'spell',
-            'range': 6,
-            'cost': {'action': 1, 'mana': 5},
-            'damage': {'dice': '2d8+4', 'type': 'healing'},
-            'save': None,
-            'effects': ['healing'],
-            'animation': 'heal',
-            'sound': 'heal.wav'
-        },
-        'firebolt': {
-            'id': 'firebolt',
-            'name': 'Firebolt',
-            'type': 'spell',
-            'range': 12,
-            'cost': {'action': 1, 'mana': 3},
-            'damage': {'dice': '2d6', 'type': 'fire'},
-            'save': None,
-            'effects': ['burn'],
-            'animation': 'firebolt',
-            'sound': 'firebolt.wav'
-        }
-    }
-    
-    @staticmethod
-    def roll_dice(dice_str: str) -> int:
-        """Бросает кости в формате 2d6 или 1d8+3"""
-        if '+' in dice_str:
-            parts = dice_str.split('+')
-            dice_part = parts[0].strip()
-            bonus = int(parts[1].strip())
-        elif '-' in dice_str:
-            parts = dice_str.split('-')
-            dice_part = parts[0].strip()
-            bonus = -int(parts[1].strip())
-        else:
-            dice_part = dice_str
-            bonus = 0
-        
-        if 'd' in dice_part:
-            count, sides = dice_part.split('d')
-            count = int(count) if count else 1
-            sides = int(sides)
-            total = sum(random.randint(1, sides) for _ in range(count))
-            return total + bonus
-        else:
-            return int(dice_part) + bonus
-    
-    @staticmethod
-    def calculate_distance(pos1: tuple, pos2: tuple) -> float:
-        """Рассчитывает расстояние между двумя точками."""
-        return math.sqrt((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2)
-    
-    @staticmethod
-    def check_visibility(source: str, target: str, table_link: str) -> bool:
-        """Проверяет видимость цели."""
-        # TODO: Реализовать полноценную проверку видимости
-        return True
-    
-    @staticmethod
-    def check_conditions(runtime) -> tuple:
-        """Проверяет состояния персонажа."""
-        if not runtime.is_alive:
-            return False, "Персонаж мёртв"
-        if runtime.is_unconscious:
-            return False, "Персонаж без сознания"
-        if 'paralyzed' in runtime.conditions:
-            return False, "Персонаж парализован"
-        if 'stunned' in runtime.conditions:
-            return False, "Персонаж оглушён"
-        return True, "OK"
-    
-    @staticmethod
-    def check_resources(runtime, ability) -> tuple:
-        """Проверяет наличие ресурсов для способности."""
-        cost = ability.get('cost', {})
-        
-        if cost.get('action', 0):
-            if runtime.action_used:
-                return False, "Основное действие уже использовано"
-        
-        if cost.get('bonus_action', 0):
-            if runtime.bonus_action_used:
-                return False, "Бонусное действие уже использовано"
-        
-        if cost.get('reaction', 0):
-            if runtime.reaction_used:
-                return False, "Реакция уже использована"
-        
-        if cost.get('mana', 0):
-            if runtime.mana < cost['mana']:
-                return False, f"Недостаточно маны (нужно {cost['mana']})"
-        
-        if cost.get('energy', 0):
-            if runtime.energy < cost['energy']:
-                return False, f"Недостаточно энергии (нужно {cost['energy']})"
-        
-        return True, "OK"
-    
-    @staticmethod
-    def calculate_attack_roll(attacker: CharacterRuntime, ability: dict) -> tuple:
-        """Вычисляет бросок атаки."""
-        # Базовая атака = d20 + модификатор
-        base_roll = random.randint(1, 20)
-        
-        # Модификатор зависит от типа способности
-        if ability['type'] == 'spell':
-            # Для заклинаний используем INT или WIS
-            mod = (attacker.intelligence - 10) // 2
-        else:
-            # Для физических атак используем STR или DEX
-            mod = (attacker.strength - 10) // 2
-        
-        total = base_roll + mod
-        return base_roll, total
-    
-    @staticmethod
-    def calculate_saving_throw(target: CharacterRuntime, ability: dict) -> tuple:
-        """Вычисляет спасбросок цели."""
-        if 'save' not in ability:
-            return True, 0
-        
-        save_info = ability['save']
-        ability_name = save_info['ability']
-        dc = save_info['dc']
-        
-        # Получаем модификатор спасброска
-        save_map = {
-            'str': target.str_save,
-            'dex': target.dex_save,
-            'con': target.con_save,
-            'int': target.int_save,
-            'wis': target.wis_save,
-            'cha': target.cha_save
-        }
-        
-        mod = save_map.get(ability_name, 0)
-        roll = random.randint(1, 20) + mod
-        
-        success = roll >= dc
-        return success, roll
-    
-    @staticmethod
-    def calculate_damage(dice_str: str, damage_type: str, target: CharacterRuntime) -> int:
-        """Рассчитывает урон с учётом сопротивлений."""
-        damage = CombatEngine.roll_dice(dice_str)
-        
-        # TODO: Реализовать сопротивления, иммунитеты и уязвимости
-        # Пока просто возвращаем урон
-        
-        return max(0, damage)
-    
-    @staticmethod
-    def apply_effects(target: CharacterRuntime, effects: list):
-        """Применяет эффекты к цели."""
-        for effect in effects:
-            if effect == 'burn':
-                if 'burn' not in target.conditions:
-                    target.conditions.append('burn')
-                    target.log_event('effect_applied', target.character_id, f"На персонажа наложено горение")
-            
-            elif effect == 'healing':
-                # Лечение уже обработано в resolve_action
-                pass
-    
-    @staticmethod
-    def resolve_action(
-        source_runtime: CharacterRuntime,
-        target_runtime: CharacterRuntime,
-        ability_id: str,
-        table_link: str
-    ) -> dict:
-        """
-        Главная функция боевого движка.
-        Получает действие, полностью рассчитывает результат.
-        """
-        # Получаем способность
-        ability = CombatEngine.ABILITIES.get(ability_id)
-        if not ability:
-            return {
-                'success': False,
-                'error': f"Способность {ability_id} не найдена"
-            }
-        
-        # 1. Проверка хода и состояния
-        can_act, msg = CombatEngine.check_conditions(source_runtime)
-        if not can_act:
-            return {
-                'success': False,
-                'error': msg,
-                'source': source_runtime.to_dict(),
-                'target': target_runtime.to_dict()
-            }
-        
-        # 2. Проверка ресурсов
-        has_resources, msg = CombatEngine.check_resources(source_runtime, ability)
-        if not has_resources:
-            return {
-                'success': False,
-                'error': msg,
-                'source': source_runtime.to_dict(),
-                'target': target_runtime.to_dict()
-            }
-        
-        # 3. Проверка дистанции
-        source_pos = (source_runtime.x, source_runtime.y)
-        target_pos = (target_runtime.x, target_runtime.y)
-        distance = CombatEngine.calculate_distance(source_pos, target_pos)
-        
-        if distance > ability.get('range', 999):
-            return {
-                'success': False,
-                'error': f"Цель слишком далеко (дистанция: {distance:.1f}, нужно: {ability['range']})",
-                'source': source_runtime.to_dict(),
-                'target': target_runtime.to_dict()
-            }
-        
-        # 4. Проверка видимости
-        if not CombatEngine.check_visibility(source_runtime.runtime_id, target_runtime.runtime_id, table_link):
-            return {
-                'success': False,
-                'error': "Цель не видна",
-                'source': source_runtime.to_dict(),
-                'target': target_runtime.to_dict()
-            }
-        
-        # 5. Бросок и проверка
-        hit = False
-        save_success = False
-        damage = 0
-        roll_info = {}
-        
-        # Для способностей с спасброском
-        if 'save' in ability:
-            save_success, save_roll = CombatEngine.calculate_saving_throw(target_runtime, ability)
-            roll_info['save_roll'] = save_roll
-            roll_info['save_dc'] = ability['save']['dc']
-            roll_info['save_ability'] = ability['save']['ability']
-            
-            if not save_success:
-                # Цель не спаслась, получает полный урон
-                damage = CombatEngine.calculate_damage(
-                    ability['damage']['dice'],
-                    ability['damage']['type'],
-                    target_runtime
-                )
-                hit = True
-            else:
-                # Цель спаслась, получает половину урона
-                damage = CombatEngine.calculate_damage(
-                    ability['damage']['dice'],
-                    ability['damage']['type'],
-                    target_runtime
-                ) // 2
-                hit = True
-        else:
-            # Атака без спасброска (прямой урон)
-            damage = CombatEngine.calculate_damage(
-                ability['damage']['dice'],
-                ability['damage']['type'],
-                target_runtime
-            )
-            hit = True
-        
-        # 6. Применяем урон
-        actual_damage = 0
-        if hit and damage > 0:
-            if ability['damage']['type'] == 'healing':
-                # Лечение
-                actual_damage = target_runtime.heal(damage)
-            else:
-                # Урон
-                actual_damage = target_runtime.take_damage(damage)
-        
-        # 7. Применяем эффекты
-        if hit:
-            CombatEngine.apply_effects(target_runtime, ability.get('effects', []))
-        
-        # 8. Тратим ресурсы
-        cost = ability.get('cost', {})
-        if cost.get('action', 0):
-            source_runtime.action_used = True
-        if cost.get('mana', 0):
-            source_runtime.mana -= cost['mana']
-        if cost.get('energy', 0):
-            source_runtime.energy -= cost['energy']
-        
-        source_runtime.last_updated = datetime.now()
-        target_runtime.last_updated = datetime.now()
-        
-        # 9. Формируем результат
-        result = {
-            'success': True,
-            'source': source_runtime.to_dict(),
-            'target': target_runtime.to_dict(),
-            'ability': {
-                'id': ability_id,
-                'name': ability['name'],
-                'type': ability['type'],
-                'animation': ability.get('animation', 'default'),
-                'sound': ability.get('sound', 'default.wav')
-            },
-            'roll_info': roll_info,
-            'hit': hit,
-            'damage': actual_damage,
-            'damage_type': ability['damage']['type'],
-            'effects_applied': ability.get('effects', []),
-            'save_success': save_success if 'save' in ability else None,
-            'distance': distance
-        }
-        
-        return result
-
-# ============================================================
-# 3. БАЗА ДАННЫХ (продолжение)
-# ============================================================
-
 def migrate_database():
     session = Session()
     try:
         from sqlalchemy import inspect
         inspector = inspect(engine)
-        
         if 'characters' not in inspector.get_table_names():
-            print("🔄 Создаём таблицы системы персонажей...")
+            print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
-        
         columns = [col['name'] for col in inspector.get_columns('game_tokens')]
         if 'character_id' not in columns:
             print("🔄 Добавляем character_id в game_tokens...")
             session.execute("ALTER TABLE game_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id)")
             session.commit()
             print("✅ Связь добавлена!")
-        
         if 'game_sessions' not in inspector.get_table_names():
             print("🔄 Создаём таблицы Game Session...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы сессий созданы!")
-            
     except Exception as e:
         print(f"⚠️ Ошибка миграции: {e}")
     finally:
@@ -621,10 +235,6 @@ def migrate_database():
 
 Base.metadata.create_all(engine)
 migrate_database()
-
-# ============================================================
-# 4. FASTAPI
-# ============================================================
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -636,10 +246,6 @@ os.makedirs(AVATAR_DIR, exist_ok=True)
 os.makedirs(MAP_DIR, exist_ok=True)
 
 connections = {}
-
-# ============================================================
-# 5. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ============================================================
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -683,10 +289,6 @@ def get_current_user(request):
 def generate_table_link():
     return secrets.token_urlsafe(8)
 
-# ============================================================
-# 6. CHARACTER RUNTIME
-# ============================================================
-
 @dataclass
 class CharacterRuntime:
     runtime_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -695,31 +297,57 @@ class CharacterRuntime:
     table_link: str = ''
     current_hp: int = 20
     temporary_hp: int = 0
-    current_ac: int = 12
-    initiative: int = 0
+    max_hp: int = 20
+    armor_class: int = 12
+    armor_class_bonus: int = 0
+    speed: int = 30
     movement_left: int = 30
+    can_fly: bool = False
+    can_swim: bool = False
+    action_used: bool = False
+    bonus_action_used: bool = False
+    reaction_used: bool = False
+    free_action_used: bool = False
+    movement_used: bool = False
+    initiative: int = 0
+    initiative_order: List[int] = field(default_factory=list)
+    round_number: int = 0
+    turn_number: int = 0
+    is_concentrating: bool = False
+    concentration_spell: str = ''
+    concentration_save_bonus: int = 0
+    is_alive: bool = True
+    is_unconscious: bool = False
+    is_dead: bool = False
+    is_prone: bool = False
+    is_invisible: bool = False
+    is_stunned: bool = False
+    is_poisoned: bool = False
+    is_blinded: bool = False
+    is_restrained: bool = False
+    is_charmed: bool = False
+    is_frightened: bool = False
+    death_saves_success: int = 0
+    death_saves_fail: int = 0
+    conditions: List[str] = field(default_factory=list)
+    active_effects: List[Dict] = field(default_factory=list)
     mana: int = 0
+    max_mana: int = 0
     energy: int = 0
+    max_energy: int = 0
     rage: int = 0
+    max_rage: int = 0
     luck: int = 0
     inspiration: bool = False
     hit_dice: str = '1d8'
     hit_dice_used: int = 0
-    action_used: bool = False
-    bonus_action_used: bool = False
-    reaction_used: bool = False
-    is_alive: bool = True
-    is_unconscious: bool = False
-    is_concentrating: bool = False
-    concentration_spell: str = ''
-    visibility: str = 'visible'
-    death_saves_success: int = 0
-    death_saves_fail: int = 0
-    active_effects: List[Dict] = field(default_factory=list)
-    cooldowns: Dict[str, int] = field(default_factory=dict)
-    conditions: List[str] = field(default_factory=list)
-    inventory_runtime: List[Dict] = field(default_factory=list)
-    equipped_items: Dict[str, int] = field(default_factory=dict)
+    spell_slots: Dict[str, int] = field(default_factory=dict)
+    sorcery_points: int = 0
+    ki_points: int = 0
+    arrows: int = 0
+    bolts: int = 0
+    bombs: int = 0
+    charges: Dict[str, int] = field(default_factory=dict)
     x: float = 0
     y: float = 0
     strength: int = 10
@@ -744,31 +372,42 @@ class CharacterRuntime:
             'player_id': self.player_id,
             'current_hp': self.current_hp,
             'temporary_hp': self.temporary_hp,
-            'current_ac': self.current_ac,
-            'initiative': self.initiative,
+            'max_hp': self.max_hp,
+            'armor_class': self.armor_class,
+            'speed': self.speed,
             'movement_left': self.movement_left,
+            'action_used': self.action_used,
+            'bonus_action_used': self.bonus_action_used,
+            'reaction_used': self.reaction_used,
+            'initiative': self.initiative,
+            'round_number': self.round_number,
+            'turn_number': self.turn_number,
+            'is_concentrating': self.is_concentrating,
+            'concentration_spell': self.concentration_spell,
+            'is_alive': self.is_alive,
+            'is_unconscious': self.is_unconscious,
+            'is_dead': self.is_dead,
+            'conditions': self.conditions,
+            'death_saves_success': self.death_saves_success,
+            'death_saves_fail': self.death_saves_fail,
+            'active_effects': self.active_effects,
             'mana': self.mana,
+            'max_mana': self.max_mana,
             'energy': self.energy,
+            'max_energy': self.max_energy,
             'rage': self.rage,
+            'max_rage': self.max_rage,
             'luck': self.luck,
             'inspiration': self.inspiration,
             'hit_dice': self.hit_dice,
             'hit_dice_used': self.hit_dice_used,
-            'action_used': self.action_used,
-            'bonus_action_used': self.bonus_action_used,
-            'reaction_used': self.reaction_used,
-            'is_alive': self.is_alive,
-            'is_unconscious': self.is_unconscious,
-            'is_concentrating': self.is_concentrating,
-            'concentration_spell': self.concentration_spell,
-            'visibility': self.visibility,
-            'death_saves_success': self.death_saves_success,
-            'death_saves_fail': self.death_saves_fail,
-            'active_effects': self.active_effects,
-            'cooldowns': self.cooldowns,
-            'conditions': self.conditions,
-            'inventory_runtime': self.inventory_runtime,
-            'equipped_items': self.equipped_items,
+            'spell_slots': self.spell_slots,
+            'sorcery_points': self.sorcery_points,
+            'ki_points': self.ki_points,
+            'arrows': self.arrows,
+            'bolts': self.bolts,
+            'bombs': self.bombs,
+            'charges': self.charges,
             'x': self.x,
             'y': self.y,
             'strength': self.strength,
@@ -805,9 +444,8 @@ class CharacterRuntime:
         return damage
 
     def heal(self, amount: int) -> int:
-        max_hp = 20  # TODO: брать из Character
         old_hp = self.current_hp
-        self.current_hp = min(max_hp, self.current_hp + amount)
+        self.current_hp = min(self.max_hp, self.current_hp + amount)
         if self.current_hp > 0:
             self.is_alive = True
             self.is_unconscious = False
@@ -839,8 +477,15 @@ class CharacterRuntime:
         self.action_used = False
         self.bonus_action_used = False
         self.reaction_used = False
-        self.movement_left = 30
+        self.movement_left = self.speed
         self.last_updated = datetime.now()
+
+    def use_movement(self, distance: int) -> bool:
+        if self.movement_left < distance:
+            return False
+        self.movement_left -= distance
+        self.last_updated = datetime.now()
+        return True
 
     def start_concentration(self, spell_name: str) -> bool:
         if self.is_concentrating:
@@ -855,20 +500,67 @@ class CharacterRuntime:
         self.concentration_spell = ''
         self.last_updated = datetime.now()
 
+    def check_concentration(self, damage: int) -> bool:
+        if not self.is_concentrating:
+            return True
+        dc = max(10, damage // 2)
+        roll = random.randint(1, 20) + self.con_save
+        if roll >= dc:
+            return True
+        else:
+            self.break_concentration()
+            return False
+
     def add_condition(self, condition: str):
         if condition not in self.conditions:
             self.conditions.append(condition)
             self.last_updated = datetime.now()
+            self._update_condition_flags()
 
     def remove_condition(self, condition: str):
         if condition in self.conditions:
             self.conditions.remove(condition)
             self.last_updated = datetime.now()
+            self._update_condition_flags()
 
-    def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
-        pass  # TODO: связать с SessionLog
+    def _update_condition_flags(self):
+        self.is_prone = 'prone' in self.conditions
+        self.is_invisible = 'invisible' in self.conditions
+        self.is_stunned = 'stunned' in self.conditions
+        self.is_poisoned = 'poisoned' in self.conditions
+        self.is_blinded = 'blinded' in self.conditions
+        self.is_restrained = 'restrained' in self.conditions
+        self.is_charmed = 'charmed' in self.conditions
+        self.is_frightened = 'frightened' in self.conditions
 
-class CharacterRuntimeManager:
+    def add_effect(self, effect: Dict):
+        if not effect.get('stackable', False):
+            self.active_effects = [e for e in self.active_effects if e.get('effect') != effect.get('effect')]
+        self.active_effects.append(effect)
+        self.last_updated = datetime.now()
+
+    def remove_effect(self, effect_type: str):
+        self.active_effects = [e for e in self.active_effects if e.get('effect') != effect_type]
+        self.last_updated = datetime.now()
+
+    def tick_effects(self):
+        expired = []
+        for i, effect in enumerate(self.active_effects):
+            if effect.get('duration', 0) > 0:
+                effect['duration'] -= 1
+                if effect['duration'] <= 0:
+                    expired.append(i)
+        for i in reversed(expired):
+            self.active_effects.pop(i)
+        self.last_updated = datetime.now()
+
+    def get_effect(self, effect_type: str) -> Optional[Dict]:
+        for effect in self.active_effects:
+            if effect.get('effect') == effect_type:
+                return effect
+        return None
+
+class RuntimeManager:
     def __init__(self):
         self._runtimes: Dict[str, CharacterRuntime] = {}
         self._character_runtimes: Dict[int, str] = {}
@@ -887,13 +579,16 @@ class CharacterRuntimeManager:
             character_id=character_id,
             player_id=player_id,
             table_link=table_link,
-            current_hp=character.current_hp,
-            current_ac=character.armor_class,
-            mana=character.mana,
-            energy=character.energy,
-            rage=character.rage,
-            luck=character.luck,
-            inspiration=character.inspiration,
+            current_hp=character.max_hp,
+            max_hp=character.max_hp,
+            armor_class=character.base_ac,
+            speed=character.speed,
+            mana=0,
+            max_mana=character.max_mana,
+            energy=0,
+            max_energy=character.max_energy,
+            rage=0,
+            max_rage=character.max_rage,
             hit_dice=character.hit_dice,
             strength=character.strength,
             dexterity=character.dexterity,
@@ -958,14 +653,6 @@ class CharacterRuntimeManager:
             ]
         return True
 
-    def delete_table_runtimes(self, table_link: str):
-        runtime_ids = self._table_runtimes.pop(table_link, [])
-        for runtime_id in runtime_ids:
-            runtime = self._runtimes.pop(runtime_id, None)
-            if runtime:
-                self._character_runtimes.pop(runtime.character_id, None)
-                self._player_runtimes.pop(runtime.player_id, None)
-
     def save_runtime_to_character(self, runtime_id: str) -> bool:
         runtime = self._runtimes.get(runtime_id)
         if not runtime:
@@ -977,7 +664,7 @@ class CharacterRuntimeManager:
                 return False
             character.current_hp = runtime.current_hp
             character.temporary_hp = runtime.temporary_hp
-            character.armor_class = runtime.current_ac
+            character.armor_class = runtime.armor_class
             character.mana = runtime.mana
             character.energy = runtime.energy
             character.rage = runtime.rage
@@ -992,281 +679,230 @@ class CharacterRuntimeManager:
         finally:
             session.close()
 
-runtime_manager = CharacterRuntimeManager()
+runtime_manager = RuntimeManager()
 
-# ============================================================
-# 7. GAME SESSION
-# ============================================================
-
-class GameSessionRuntime:
-    def __init__(self, session_id: str, name: str, gm_id: int, table_link: str):
-        self.session_id = session_id
-        self.name = name
-        self.gm_id = gm_id
-        self.table_link = table_link
-        self.state = 'LOBBY'
-        self.created_at = datetime.now()
-        self.started_at = None
-        self.finished_at = None
-        self.current_map = ''
-        self.current_scene = ''
-        self.current_round = 0
-        self.current_turn = 0
-        self.current_player_id = None
-        self.players: Dict[int, 'PlayerSession'] = {}
-        self.runtimes: Dict[str, CharacterRuntime] = {}
-        self.npc_runtimes: Dict[str, CharacterRuntime] = {}
-        self.monsters: Dict[str, CharacterRuntime] = {}
-        self.event_queue: List[Dict] = []
-        self.settings = {'max_players': 6, 'combat_style': 'standard', 'initiative_visible': True, 'auto_roll': False}
-        self.logs: List[Dict] = []
-        self.is_active = True
-
-    def to_dict(self) -> dict:
+class CombatEngine:
+    ABILITIES = {
+        'fireball': {
+            'id': 'fireball',
+            'name': 'Fireball',
+            'type': 'spell',
+            'range': 18,
+            'cost': {'action': 1, 'mana': 10},
+            'damage': {'dice': '8d6', 'type': 'fire'},
+            'save': {'ability': 'dex', 'dc': 15},
+            'effects': ['burn'],
+            'animation': 'fireball',
+            'sound': 'fireball.wav'
+        },
+        'sword_attack': {
+            'id': 'sword_attack',
+            'name': 'Sword Attack',
+            'type': 'attack',
+            'range': 1,
+            'cost': {'action': 1},
+            'damage': {'dice': '1d8+3', 'type': 'slashing'},
+            'save': None,
+            'effects': [],
+            'animation': 'slash',
+            'sound': 'sword.wav'
+        },
+        'heal': {
+            'id': 'heal',
+            'name': 'Heal',
+            'type': 'spell',
+            'range': 6,
+            'cost': {'action': 1, 'mana': 5},
+            'damage': {'dice': '2d8+4', 'type': 'healing'},
+            'save': None,
+            'effects': ['healing'],
+            'animation': 'heal',
+            'sound': 'heal.wav'
+        },
+        'firebolt': {
+            'id': 'firebolt',
+            'name': 'Firebolt',
+            'type': 'spell',
+            'range': 12,
+            'cost': {'action': 1, 'mana': 3},
+            'damage': {'dice': '2d6', 'type': 'fire'},
+            'save': None,
+            'effects': ['burn'],
+            'animation': 'firebolt',
+            'sound': 'firebolt.wav'
+        }
+    }
+    
+    @staticmethod
+    def roll_dice(dice_str: str) -> int:
+        if '+' in dice_str:
+            parts = dice_str.split('+')
+            dice_part = parts[0].strip()
+            bonus = int(parts[1].strip())
+        elif '-' in dice_str:
+            parts = dice_str.split('-')
+            dice_part = parts[0].strip()
+            bonus = -int(parts[1].strip())
+        else:
+            dice_part = dice_str
+            bonus = 0
+        if 'd' in dice_part:
+            count, sides = dice_part.split('d')
+            count = int(count) if count else 1
+            sides = int(sides)
+            total = sum(random.randint(1, sides) for _ in range(count))
+            return total + bonus
+        else:
+            return int(dice_part) + bonus
+    
+    @staticmethod
+    def calculate_distance(pos1: tuple, pos2: tuple) -> float:
+        return math.sqrt((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2)
+    
+    @staticmethod
+    def check_conditions(runtime: CharacterRuntime) -> tuple:
+        if not runtime.is_alive:
+            return False, "Персонаж мёртв"
+        if runtime.is_unconscious:
+            return False, "Персонаж без сознания"
+        if runtime.is_stunned:
+            return False, "Персонаж оглушён"
+        if runtime.is_dead:
+            return False, "Персонаж мёртв"
+        if 'paralyzed' in runtime.conditions:
+            return False, "Персонаж парализован"
+        return True, "OK"
+    
+    @staticmethod
+    def check_resources(runtime: CharacterRuntime, ability: dict) -> tuple:
+        cost = ability.get('cost', {})
+        if cost.get('action', 0) and runtime.action_used:
+            return False, "Основное действие уже использовано"
+        if cost.get('bonus_action', 0) and runtime.bonus_action_used:
+            return False, "Бонусное действие уже использовано"
+        if cost.get('reaction', 0) and runtime.reaction_used:
+            return False, "Реакция уже использована"
+        if cost.get('mana', 0) and runtime.mana < cost['mana']:
+            return False, f"Недостаточно маны (нужно {cost['mana']})"
+        if cost.get('energy', 0) and runtime.energy < cost['energy']:
+            return False, f"Недостаточно энергии (нужно {cost['energy']})"
+        return True, "OK"
+    
+    @staticmethod
+    def calculate_saving_throw(target: CharacterRuntime, ability: dict) -> tuple:
+        if 'save' not in ability:
+            return True, 0
+        save_info = ability['save']
+        ability_name = save_info['ability']
+        dc = save_info['dc']
+        save_map = {
+            'str': target.str_save,
+            'dex': target.dex_save,
+            'con': target.con_save,
+            'int': target.int_save,
+            'wis': target.wis_save,
+            'cha': target.cha_save
+        }
+        mod = save_map.get(ability_name, 0)
+        roll = random.randint(1, 20) + mod
+        success = roll >= dc
+        return success, roll
+    
+    @staticmethod
+    def calculate_damage(dice_str: str, damage_type: str, target: CharacterRuntime) -> int:
+        damage = CombatEngine.roll_dice(dice_str)
+        return max(0, damage)
+    
+    @staticmethod
+    def apply_effects(target: CharacterRuntime, effects: list):
+        for effect in effects:
+            if effect == 'burn':
+                target.add_effect({
+                    'effect': 'burn',
+                    'duration': 3,
+                    'damage': '1d6',
+                    'stackable': False
+                })
+            elif effect == 'healing':
+                pass
+    
+    @staticmethod
+    def resolve_action(
+        source_runtime: CharacterRuntime,
+        target_runtime: CharacterRuntime,
+        ability_id: str,
+        table_link: str
+    ) -> dict:
+        ability = CombatEngine.ABILITIES.get(ability_id)
+        if not ability:
+            return {'success': False, 'error': f"Способность {ability_id} не найдена"}
+        can_act, msg = CombatEngine.check_conditions(source_runtime)
+        if not can_act:
+            return {'success': False, 'error': msg}
+        has_resources, msg = CombatEngine.check_resources(source_runtime, ability)
+        if not has_resources:
+            return {'success': False, 'error': msg}
+        source_pos = (source_runtime.x, source_runtime.y)
+        target_pos = (target_runtime.x, target_runtime.y)
+        distance = CombatEngine.calculate_distance(source_pos, target_pos)
+        if distance > ability.get('range', 999):
+            return {'success': False, 'error': f"Цель слишком далеко (дистанция: {distance:.1f}, нужно: {ability['range']})"}
+        hit = False
+        save_success = False
+        damage = 0
+        roll_info = {}
+        if 'save' in ability:
+            save_success, save_roll = CombatEngine.calculate_saving_throw(target_runtime, ability)
+            roll_info['save_roll'] = save_roll
+            roll_info['save_dc'] = ability['save']['dc']
+            roll_info['save_ability'] = ability['save']['ability']
+            if not save_success:
+                damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime)
+                hit = True
+            else:
+                damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime) // 2
+                hit = True
+        else:
+            damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime)
+            hit = True
+        actual_damage = 0
+        if hit and damage > 0:
+            if ability['damage']['type'] == 'healing':
+                actual_damage = target_runtime.heal(damage)
+            else:
+                actual_damage = target_runtime.take_damage(damage)
+        if actual_damage > 0:
+            target_runtime.check_concentration(actual_damage)
+        if hit:
+            CombatEngine.apply_effects(target_runtime, ability.get('effects', []))
+        cost = ability.get('cost', {})
+        if cost.get('action', 0):
+            source_runtime.action_used = True
+        if cost.get('mana', 0):
+            source_runtime.mana -= cost['mana']
+        if cost.get('energy', 0):
+            source_runtime.energy -= cost['energy']
+        source_runtime.last_updated = datetime.now()
+        target_runtime.last_updated = datetime.now()
         return {
-            'session_id': self.session_id,
-            'name': self.name,
-            'gm_id': self.gm_id,
-            'table_link': self.table_link,
-            'state': self.state,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
-            'current_round': self.current_round,
-            'current_turn': self.current_turn,
-            'current_player_id': self.current_player_id,
-            'players_count': len(self.players),
-            'runtimes_count': len(self.runtimes),
-            'settings': self.settings
+            'success': True,
+            'source': source_runtime.to_dict(),
+            'target': target_runtime.to_dict(),
+            'ability': {
+                'id': ability_id,
+                'name': ability['name'],
+                'type': ability['type'],
+                'animation': ability.get('animation', 'default'),
+                'sound': ability.get('sound', 'default.wav')
+            },
+            'roll_info': roll_info,
+            'hit': hit,
+            'damage': actual_damage,
+            'damage_type': ability['damage']['type'],
+            'effects_applied': ability.get('effects', []),
+            'save_success': save_success if 'save' in ability else None,
+            'distance': distance
         }
-
-    def add_player(self, player_session: 'PlayerSession') -> bool:
-        if player_session.player_id in self.players:
-            return False
-        self.players[player_session.player_id] = player_session
-        self.log_event('player_joined', player_session.player_id, f"Игрок {player_session.player_name} присоединился")
-        return True
-
-    def remove_player(self, player_id: int) -> bool:
-        if player_id not in self.players:
-            return False
-        player = self.players.pop(player_id)
-        self.log_event('player_left', player_id, f"Игрок {player.player_name} покинул сессию")
-        return True
-
-    def add_runtime(self, runtime: CharacterRuntime) -> bool:
-        if runtime.runtime_id in self.runtimes:
-            return False
-        self.runtimes[runtime.runtime_id] = runtime
-        self.log_event('runtime_added', runtime.character_id, f"Персонаж {runtime.character_id} добавлен в сессию")
-        return True
-
-    def remove_runtime(self, runtime_id: str) -> bool:
-        if runtime_id not in self.runtimes:
-            return False
-        runtime = self.runtimes.pop(runtime_id)
-        self.log_event('runtime_removed', runtime.character_id, f"Персонаж {runtime.character_id} удалён из сессии")
-        return True
-
-    def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
-        log_entry = {
-            'timestamp': datetime.now().isoformat(),
-            'event_type': event_type,
-            'actor_id': actor_id,
-            'message': message,
-            'data': data or {}
-        }
-        self.logs.append(log_entry)
-        self.event_queue.append(log_entry)
-        if len(self.logs) > 1000:
-            self.logs = self.logs[-1000:]
-
-    def start_session(self) -> bool:
-        if self.state not in ['LOBBY', 'WAITING_PLAYERS']:
-            return False
-        self.state = 'PLAYING'
-        self.started_at = datetime.now()
-        self.log_event('session_started', self.gm_id, "Сессия начата")
-        return True
-
-    def pause_session(self) -> bool:
-        if self.state not in ['PLAYING', 'COMBAT']:
-            return False
-        self.state = 'PAUSED'
-        self.log_event('session_paused', self.gm_id, "Сессия на паузе")
-        return True
-
-    def resume_session(self) -> bool:
-        if self.state != 'PAUSED':
-            return False
-        self.state = 'PLAYING'
-        self.log_event('session_resumed', self.gm_id, "Сессия возобновлена")
-        return True
-
-    def finish_session(self) -> bool:
-        if self.state == 'FINISHED':
-            return False
-        self.state = 'FINISHED'
-        self.finished_at = datetime.now()
-        self.is_active = False
-        self.log_event('session_finished', self.gm_id, "Сессия завершена")
-        return True
-
-    def get_players_ready(self) -> bool:
-        if not self.players:
-            return False
-        return all(p.ready for p in self.players.values())
-
-
-class PlayerSession:
-    def __init__(self, player_id: int, player_name: str, connection_id: str = None):
-        self.player_id = player_id
-        self.player_name = player_name
-        self.connection_id = connection_id
-        self.character_runtime_id: Optional[str] = None
-        self.ready = False
-        self.online = True
-        self.ping = 0
-        self.last_activity = datetime.now()
-        self.joined_at = datetime.now()
-
-    def to_dict(self) -> dict:
-        return {
-            'player_id': self.player_id,
-            'player_name': self.player_name,
-            'connection_id': self.connection_id,
-            'character_runtime_id': self.character_runtime_id,
-            'ready': self.ready,
-            'online': self.online,
-            'ping': self.ping,
-            'last_activity': self.last_activity.isoformat() if self.last_activity else None,
-            'joined_at': self.joined_at.isoformat() if self.joined_at else None
-        }
-
-    def set_ready(self, ready: bool):
-        self.ready = ready
-        self.last_activity = datetime.now()
-
-    def update_ping(self, ping: int):
-        self.ping = ping
-        self.last_activity = datetime.now()
-
-    def set_character(self, runtime_id: str):
-        self.character_runtime_id = runtime_id
-        self.ready = True
-        self.last_activity = datetime.now()
-
-
-class SessionManager:
-    def __init__(self):
-        self._sessions: Dict[str, GameSessionRuntime] = {}
-        self._table_sessions: Dict[str, str] = {}
-        self._player_sessions: Dict[int, str] = {}
-
-    def create_session(self, name: str, gm_id: int, table_link: str) -> GameSessionRuntime:
-        session_id = str(uuid.uuid4())
-        db_session = Session()
-        try:
-            game_session = GameSession(
-                session_id=session_id,
-                name=name,
-                gm_id=gm_id,
-                table_link=table_link,
-                state='LOBBY'
-            )
-            db_session.add(game_session)
-            db_session.commit()
-        except Exception as e:
-            db_session.rollback()
-            raise e
-        finally:
-            db_session.close()
-        runtime = GameSessionRuntime(session_id, name, gm_id, table_link)
-        self._sessions[session_id] = runtime
-        self._table_sessions[table_link] = session_id
-        return runtime
-
-    def get_session(self, session_id: str) -> Optional[GameSessionRuntime]:
-        return self._sessions.get(session_id)
-
-    def get_session_by_table(self, table_link: str) -> Optional[GameSessionRuntime]:
-        session_id = self._table_sessions.get(table_link)
-        if session_id:
-            return self._sessions.get(session_id)
-        return None
-
-    def get_session_by_player(self, player_id: int) -> Optional[GameSessionRuntime]:
-        session_id = self._player_sessions.get(player_id)
-        if session_id:
-            return self._sessions.get(session_id)
-        return None
-
-    def add_player_to_session(self, session_id: str, player_id: int, player_name: str, connection_id: str = None) -> bool:
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        player_session = PlayerSession(player_id, player_name, connection_id)
-        if session.add_player(player_session):
-            self._player_sessions[player_id] = session_id
-            return True
-        return False
-
-    def remove_player_from_session(self, player_id: int) -> bool:
-        session_id = self._player_sessions.get(player_id)
-        if not session_id:
-            return False
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        if session.remove_player(player_id):
-            self._player_sessions.pop(player_id, None)
-            return True
-        return False
-
-    def delete_session(self, session_id: str) -> bool:
-        session = self._sessions.pop(session_id, None)
-        if not session:
-            return False
-        self._table_sessions.pop(session.table_link, None)
-        for player_id in list(session.players.keys()):
-            self._player_sessions.pop(player_id, None)
-        db_session = Session()
-        try:
-            db_game_session = db_session.query(GameSession).filter_by(session_id=session_id).first()
-            if db_game_session:
-                db_game_session.state = 'FINISHED'
-                db_game_session.finished_at = datetime.now()
-                db_session.commit()
-        except Exception as e:
-            db_session.rollback()
-            print(f"Error updating session in DB: {e}")
-        finally:
-            db_session.close()
-        return True
-
-    def get_all_sessions(self) -> List[GameSessionRuntime]:
-        return list(self._sessions.values())
-
-    def get_player_session(self, player_id: int) -> Optional[PlayerSession]:
-        session_id = self._player_sessions.get(player_id)
-        if not session_id:
-            return None
-        session = self._sessions.get(session_id)
-        if not session:
-            return None
-        return session.players.get(player_id)
-
-    def get_session_logs(self, session_id: str, limit: int = 50) -> List[Dict]:
-        session = self._sessions.get(session_id)
-        if not session:
-            return []
-        return session.logs[-limit:]
-
-session_manager = SessionManager()
-
-# ============================================================
-# 8. API: CHARACTERS
-# ============================================================
 
 @app.post("/api/character/create")
 async def create_character(request: Request, data: dict):
@@ -1291,11 +927,9 @@ async def create_character(request: Request, data: dict):
             level=data.get('level', 1),
             experience=data.get('experience', 0),
             max_hp=data.get('max_hp', 20),
-            current_hp=data.get('current_hp', 20),
-            temporary_hp=data.get('temporary_hp', 0),
-            armor_class=data.get('armor_class', 12),
-            initiative_bonus=data.get('initiative_bonus', 0),
+            base_ac=data.get('base_ac', 12),
             speed=data.get('speed', 30),
+            initiative_bonus=data.get('initiative_bonus', 0),
             strength=data.get('strength', 10),
             dexterity=data.get('dexterity', 10),
             constitution=data.get('constitution', 10),
@@ -1308,11 +942,9 @@ async def create_character(request: Request, data: dict):
             int_save=data.get('int_save', 0),
             wis_save=data.get('wis_save', 0),
             cha_save=data.get('cha_save', 0),
-            mana=data.get('mana', 0),
-            energy=data.get('energy', 0),
-            rage=data.get('rage', 0),
-            luck=data.get('luck', 0),
-            inspiration=data.get('inspiration', False),
+            max_mana=data.get('max_mana', 0),
+            max_energy=data.get('max_energy', 0),
+            max_rage=data.get('max_rage', 0),
             hit_dice=data.get('hit_dice', '1d8'),
             created_by=user.id
         )
@@ -1349,11 +981,9 @@ async def get_character(character_id: int):
             "level": character.level,
             "experience": character.experience,
             "max_hp": character.max_hp,
-            "current_hp": character.current_hp,
-            "temporary_hp": character.temporary_hp,
-            "armor_class": character.armor_class,
-            "initiative_bonus": character.initiative_bonus,
+            "base_ac": character.base_ac,
             "speed": character.speed,
+            "initiative_bonus": character.initiative_bonus,
             "strength": character.strength,
             "dexterity": character.dexterity,
             "constitution": character.constitution,
@@ -1366,21 +996,15 @@ async def get_character(character_id: int):
             "int_save": character.int_save,
             "wis_save": character.wis_save,
             "cha_save": character.cha_save,
-            "mana": character.mana,
-            "energy": character.energy,
-            "rage": character.rage,
-            "luck": character.luck,
-            "inspiration": character.inspiration,
+            "max_mana": character.max_mana,
+            "max_energy": character.max_energy,
+            "max_rage": character.max_rage,
             "hit_dice": character.hit_dice
         }}
     except Exception as e:
         return {"success": False, "message": str(e)}
     finally:
         session.close()
-
-# ============================================================
-# 9. API: CHARACTER RUNTIME
-# ============================================================
 
 @app.post("/api/runtime/create")
 async def create_runtime(request: Request, data: dict):
@@ -1446,45 +1070,30 @@ async def delete_runtime(request: Request, data: dict):
         return {"success": False, "message": "Runtime не найден"}
     return {"success": True, "message": "Runtime удалён"}
 
-# ============================================================
-# 10. API: COMBAT
-# ============================================================
-
 @app.post("/api/combat/action")
 async def combat_action(request: Request, data: dict):
-    """Выполняет боевое действие."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
-    
     source_runtime_id = data.get('source_runtime_id')
     target_runtime_id = data.get('target_runtime_id')
     ability_id = data.get('ability_id')
-    
     if not source_runtime_id or not target_runtime_id or not ability_id:
         return {"success": False, "message": "Не указаны source_runtime_id, target_runtime_id или ability_id"}
-    
-    # Получаем Runtime
     source_runtime = runtime_manager.get_runtime(source_runtime_id)
     target_runtime = runtime_manager.get_runtime(target_runtime_id)
-    
     if not source_runtime:
         return {"success": False, "message": "Источник не найден"}
     if not target_runtime:
         return {"success": False, "message": "Цель не найдена"}
-    
-    # Выполняем действие
     result = CombatEngine.resolve_action(
         source_runtime,
         target_runtime,
         ability_id,
         data.get('table_link', '')
     )
-    
     if not result.get('success'):
         return result
-    
-    # Отправляем результат всем в комнате
     table_link = data.get('table_link')
     if table_link and table_link in connections:
         for ws in connections[table_link]:
@@ -1495,35 +1104,195 @@ async def combat_action(request: Request, data: dict):
                 }))
             except:
                 pass
-    
-    # Сохраняем изменения Runtime
     runtime_manager.save_runtime_to_character(source_runtime_id)
     runtime_manager.save_runtime_to_character(target_runtime_id)
-    
-    return {
-        'success': True,
-        'result': result
-    }
+    return {'success': True, 'result': result}
 
 @app.get("/api/combat/abilities")
 async def get_abilities():
-    """Возвращает список всех доступных способностей."""
-    return {
-        'success': True,
-        'abilities': list(CombatEngine.ABILITIES.values())
-    }
+    return {'success': True, 'abilities': list(CombatEngine.ABILITIES.values())}
 
 @app.get("/api/combat/ability/{ability_id}")
 async def get_ability(ability_id: str):
-    """Возвращает информацию о способности."""
     ability = CombatEngine.ABILITIES.get(ability_id)
     if not ability:
         return {"success": False, "message": "Способность не найдена"}
     return {"success": True, "ability": ability}
 
-# ============================================================
-# 11. API: GAME SESSION
-# ============================================================
+class GameSessionRuntime:
+    def __init__(self, session_id: str, name: str, gm_id: int, table_link: str):
+        self.session_id = session_id
+        self.name = name
+        self.gm_id = gm_id
+        self.table_link = table_link
+        self.state = 'LOBBY'
+        self.created_at = datetime.now()
+        self.started_at = None
+        self.finished_at = None
+        self.current_round = 0
+        self.current_turn = 0
+        self.current_player_id = None
+        self.players: Dict[int, 'PlayerSession'] = {}
+        self.runtimes: Dict[str, CharacterRuntime] = {}
+        self.logs: List[Dict] = []
+        self.is_active = True
+
+    def to_dict(self) -> dict:
+        return {
+            'session_id': self.session_id,
+            'name': self.name,
+            'gm_id': self.gm_id,
+            'table_link': self.table_link,
+            'state': self.state,
+            'current_round': self.current_round,
+            'current_turn': self.current_turn,
+            'current_player_id': self.current_player_id,
+            'players_count': len(self.players),
+            'runtimes_count': len(self.runtimes),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None
+        }
+
+    def add_player(self, player_session: 'PlayerSession') -> bool:
+        if player_session.player_id in self.players:
+            return False
+        self.players[player_session.player_id] = player_session
+        self.log_event('player_joined', player_session.player_id, f"Игрок {player_session.player_name} присоединился")
+        return True
+
+    def remove_player(self, player_id: int) -> bool:
+        if player_id not in self.players:
+            return False
+        player = self.players.pop(player_id)
+        self.log_event('player_left', player_id, f"Игрок {player.player_name} покинул сессию")
+        return True
+
+    def add_runtime(self, runtime: CharacterRuntime) -> bool:
+        if runtime.runtime_id in self.runtimes:
+            return False
+        self.runtimes[runtime.runtime_id] = runtime
+        self.log_event('runtime_added', runtime.character_id, f"Runtime {runtime.character_id} добавлен")
+        return True
+
+    def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
+        self.logs.append({
+            'timestamp': datetime.now().isoformat(),
+            'event_type': event_type,
+            'actor_id': actor_id,
+            'message': message,
+            'data': data or {}
+        })
+        if len(self.logs) > 1000:
+            self.logs = self.logs[-1000:]
+
+    def start_session(self) -> bool:
+        if self.state not in ['LOBBY', 'WAITING_PLAYERS']:
+            return False
+        self.state = 'PLAYING'
+        self.started_at = datetime.now()
+        self.log_event('session_started', self.gm_id, "Сессия начата")
+        return True
+
+    def finish_session(self) -> bool:
+        if self.state == 'FINISHED':
+            return False
+        self.state = 'FINISHED'
+        self.finished_at = datetime.now()
+        self.is_active = False
+        self.log_event('session_finished', self.gm_id, "Сессия завершена")
+        return True
+
+class PlayerSession:
+    def __init__(self, player_id: int, player_name: str, connection_id: str = None):
+        self.player_id = player_id
+        self.player_name = player_name
+        self.connection_id = connection_id
+        self.character_runtime_id: Optional[str] = None
+        self.ready = False
+        self.online = True
+        self.joined_at = datetime.now()
+
+    def to_dict(self) -> dict:
+        return {
+            'player_id': self.player_id,
+            'player_name': self.player_name,
+            'character_runtime_id': self.character_runtime_id,
+            'ready': self.ready,
+            'online': self.online,
+            'joined_at': self.joined_at.isoformat() if self.joined_at else None
+        }
+
+class SessionManager:
+    def __init__(self):
+        self._sessions: Dict[str, GameSessionRuntime] = {}
+        self._table_sessions: Dict[str, str] = {}
+        self._player_sessions: Dict[int, str] = {}
+
+    def create_session(self, name: str, gm_id: int, table_link: str) -> GameSessionRuntime:
+        session_id = str(uuid.uuid4())
+        db_session = Session()
+        try:
+            game_session = GameSession(
+                session_id=session_id,
+                name=name,
+                gm_id=gm_id,
+                table_link=table_link,
+                state='LOBBY'
+            )
+            db_session.add(game_session)
+            db_session.commit()
+        except Exception as e:
+            db_session.rollback()
+            raise e
+        finally:
+            db_session.close()
+        runtime = GameSessionRuntime(session_id, name, gm_id, table_link)
+        self._sessions[session_id] = runtime
+        self._table_sessions[table_link] = session_id
+        return runtime
+
+    def get_session(self, session_id: str) -> Optional[GameSessionRuntime]:
+        return self._sessions.get(session_id)
+
+    def get_session_by_table(self, table_link: str) -> Optional[GameSessionRuntime]:
+        session_id = self._table_sessions.get(table_link)
+        if session_id:
+            return self._sessions.get(session_id)
+        return None
+
+    def add_player_to_session(self, session_id: str, player_id: int, player_name: str, connection_id: str = None) -> bool:
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        player_session = PlayerSession(player_id, player_name, connection_id)
+        if session.add_player(player_session):
+            self._player_sessions[player_id] = session_id
+            return True
+        return False
+
+    def remove_player_from_session(self, player_id: int) -> bool:
+        session_id = self._player_sessions.get(player_id)
+        if not session_id:
+            return False
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        if session.remove_player(player_id):
+            self._player_sessions.pop(player_id, None)
+            return True
+        return False
+
+    def get_all_sessions(self) -> List[GameSessionRuntime]:
+        return list(self._sessions.values())
+
+    def get_session_logs(self, session_id: str, limit: int = 50) -> List[Dict]:
+        session = self._sessions.get(session_id)
+        if not session:
+            return []
+        return session.logs[-limit:]
+
+session_manager = SessionManager()
 
 @app.post("/api/session/create")
 async def create_session(request: Request, data: dict):
@@ -1651,10 +1420,6 @@ async def get_all_sessions():
     sessions = session_manager.get_all_sessions()
     return {"success": True, "sessions": [s.to_dict() for s in sessions]}
 
-# ============================================================
-# 12. API: TABLES, TOKENS, MAP
-# ============================================================
-
 @app.post("/api/upload_avatar")
 async def upload_avatar(file: UploadFile = File(...)):
     try:
@@ -1749,19 +1514,7 @@ async def create_token(request: Request, data: dict):
             is_visible=True,
             layer=data.get('layer', 'common'),
             description=data.get('description', ''),
-            character_id=data.get('character_id', None),
-            strength=data.get('strength', 10),
-            dexterity=data.get('dexterity', 10),
-            constitution=data.get('constitution', 10),
-            intelligence=data.get('intelligence', 10),
-            wisdom=data.get('wisdom', 10),
-            charisma=data.get('charisma', 10),
-            hp=data.get('hp', 20),
-            max_hp=data.get('max_hp', 20),
-            ac=data.get('ac', 12),
-            level=data.get('level', 1),
-            race=data.get('race', ''),
-            class_name=data.get('class_name', '')
+            character_id=data.get('character_id', None)
         )
         session.add(token)
         session.commit()
@@ -1793,18 +1546,6 @@ async def update_token(data: dict):
         token.name = data.get('name', token.name)
         token.avatar_url = data.get('avatar_url', token.avatar_url)
         token.description = data.get('description', token.description)
-        token.strength = data.get('strength', token.strength)
-        token.dexterity = data.get('dexterity', token.dexterity)
-        token.constitution = data.get('constitution', token.constitution)
-        token.intelligence = data.get('intelligence', token.intelligence)
-        token.wisdom = data.get('wisdom', token.wisdom)
-        token.charisma = data.get('charisma', token.charisma)
-        token.hp = data.get('hp', token.hp)
-        token.max_hp = data.get('max_hp', token.max_hp)
-        token.ac = data.get('ac', token.ac)
-        token.level = data.get('level', token.level)
-        token.race = data.get('race', token.race)
-        token.class_name = data.get('class_name', token.class_name)
         if 'character_id' in data:
             token.character_id = data['character_id']
         if 'layer' in data:
@@ -1947,19 +1688,7 @@ async def get_token(token_id: int):
             "role": token.role,
             "layer": token.layer,
             "character_id": token.character_id,
-            "description": token.description,
-            "race": token.race,
-            "class_name": token.class_name,
-            "level": token.level,
-            "strength": token.strength,
-            "dexterity": token.dexterity,
-            "constitution": token.constitution,
-            "intelligence": token.intelligence,
-            "wisdom": token.wisdom,
-            "charisma": token.charisma,
-            "hp": token.hp,
-            "max_hp": token.max_hp,
-            "ac": token.ac
+            "description": token.description
         }}
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -2008,10 +1737,6 @@ async def delete_table(data: dict):
     finally:
         session.close()
 
-# ============================================================
-# 13. ИНИЦИАЛИЗАЦИЯ БИБЛИОТЕК
-# ============================================================
-
 def init_libraries():
     session = Session()
     if session.query(Settings).first():
@@ -2030,10 +1755,6 @@ def init_libraries():
     print("✅ Библиотеки инициализированы!")
 
 init_libraries()
-
-# ============================================================
-# 14. СТРАНИЦЫ
-# ============================================================
 
 @app.get("/")
 async def root(request: Request):
@@ -2218,10 +1939,6 @@ async def game_room(request: Request, table_link: str):
         session.close()
         return HTMLResponse(content=f"<h2>Ошибка: {e}</h2>", status_code=500)
 
-# ============================================================
-# 15. WEBSOCKET
-# ============================================================
-
 @app.websocket("/ws/{table_link}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: int):
     await websocket.accept()
@@ -2230,8 +1947,6 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
     connections[table_link].append(websocket)
     user = get_user_by_id(player_id)
     player_name = user.login if user else str(player_id)
-    
-    # Находим или создаём сессию для стола
     session = session_manager.get_session_by_table(table_link)
     if not session:
         gm = Session().query(GameTable).filter_by(link=table_link).first()
@@ -2241,8 +1956,6 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                 gm.gm_id,
                 table_link
             )
-    
-    # Добавляем игрока в сессию
     if session:
         session_manager.add_player_to_session(
             session.session_id,
@@ -2254,12 +1967,9 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
             "type": "session_joined",
             "session": session.to_dict()
         }))
-    
-    # Создаём Runtime для персонажа
     db_session = Session()
     token = db_session.query(GameToken).filter_by(table_link=table_link, owner_name=player_name, is_active=True).first()
     db_session.close()
-    
     if token and token.character_id:
         try:
             runtime = runtime_manager.create_runtime(token.character_id, player_id, table_link)
@@ -2274,12 +1984,10 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                 "type": "error",
                 "message": f"Ошибка создания Runtime: {e}"
             }))
-    
     await websocket.send_text(json.dumps({
         "type": "system",
         "text": f"Добро пожаловать в игру {table_link}, {player_name}!"
     }))
-    
     try:
         while True:
             data = await websocket.receive_text()
@@ -2306,15 +2014,12 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                         except:
                             pass
                 elif msg.get('type') == 'combat_action':
-                    # Обработка боевого действия через WebSocket
                     source_runtime_id = msg.get('source_runtime_id')
                     target_runtime_id = msg.get('target_runtime_id')
                     ability_id = msg.get('ability_id')
-                    
                     if source_runtime_id and target_runtime_id and ability_id:
                         source_runtime = runtime_manager.get_runtime(source_runtime_id)
                         target_runtime = runtime_manager.get_runtime(target_runtime_id)
-                        
                         if source_runtime and target_runtime:
                             result = CombatEngine.resolve_action(
                                 source_runtime,
@@ -2322,8 +2027,6 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                                 ability_id,
                                 table_link
                             )
-                            
-                            # Отправляем результат всем
                             for ws in connections.get(table_link, []):
                                 try:
                                     await ws.send_text(json.dumps({
@@ -2332,8 +2035,6 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                                     }))
                                 except:
                                     pass
-                            
-                            # Сохраняем изменения
                             runtime_manager.save_runtime_to_character(source_runtime_id)
                             runtime_manager.save_runtime_to_character(target_runtime_id)
             except json.JSONDecodeError:
@@ -2347,10 +2048,6 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
             connections[table_link].remove(websocket)
             if not connections[table_link]:
                 del connections[table_link]
-
-# ============================================================
-# 16. ЗАПУСК
-# ============================================================
 
 if __name__ == "__main__":
     import uvicorn
