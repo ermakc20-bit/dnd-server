@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, Uplo
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Float, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Float, Text, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 from datetime import datetime
 import hashlib
@@ -12,8 +12,13 @@ import os
 import uuid
 import random
 import math
+import re
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass, field
+
+# ============================================================
+# 1. БАЗА ДАННЫХ
+# ============================================================
 
 Base = declarative_base()
 engine = create_engine('sqlite:///dnd_game.db', connect_args={'check_same_thread': False})
@@ -36,87 +41,160 @@ class Settings(Base):
     theme = Column(String)
     background_image = Column(String)
 
+# ============================================================
+# 2. CHARACTER — ЕДИНАЯ СТРУКТУРА ПЕРСОНАЖА
+# ============================================================
+
 class Character(Base):
     __tablename__ = 'characters'
+    
     id = Column(Integer, primary_key=True)
     name = Column(String(50), nullable=False)
     surname = Column(String(50), default='')
     nickname = Column(String(50), default='')
-    avatar = Column(String(255), default='')
-    description = Column(Text, default='')
-    biography = Column(Text, default='')
-    age = Column(Integer, default=0)
-    gender = Column(String(20), default='')
     race = Column(String(50), default='')
     class_name = Column(String(50), default='')
     background = Column(String(50), default='')
-    alignment = Column(String(20), default='')
-    level = Column(Integer, default=1)
-    experience = Column(Integer, default=0)
-    max_hp = Column(Integer, default=20)
-    base_ac = Column(Integer, default=12)
-    speed = Column(Integer, default=30)
-    initiative_bonus = Column(Integer, default=0)
-    strength = Column(Integer, default=10)
-    dexterity = Column(Integer, default=10)
-    constitution = Column(Integer, default=10)
-    intelligence = Column(Integer, default=10)
-    wisdom = Column(Integer, default=10)
-    charisma = Column(Integer, default=10)
-    str_save = Column(Integer, default=0)
-    dex_save = Column(Integer, default=0)
-    con_save = Column(Integer, default=0)
-    int_save = Column(Integer, default=0)
-    wis_save = Column(Integer, default=0)
-    cha_save = Column(Integer, default=0)
-    max_mana = Column(Integer, default=0)
-    max_energy = Column(Integer, default=0)
-    max_rage = Column(Integer, default=0)
-    hit_dice = Column(String(10), default='1d8')
+    player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    table_id = Column(Integer, ForeignKey('game_tables.id'), nullable=True)
+    
+    portrait = Column(String(255), default='')
+    token = Column(String(255), default='')
+    model = Column(String(255), default='')
+    gender = Column(String(20), default='')
+    age = Column(Integer, default=0)
     height = Column(Float, default=0.0)
     weight = Column(Float, default=0.0)
-    eye_color = Column(String(20), default='')
-    hair_color = Column(String(20), default='')
-    skin_color = Column(String(20), default='')
-    avatar_path = Column(String(255), default='')
-    token_path = Column(String(255), default='')
-    portrait_path = Column(String(255), default='')
+    hair = Column(String(30), default='')
+    eyes = Column(String(30), default='')
+    skin = Column(String(30), default='')
+    
+    str_base = Column(Integer, default=10)
+    str_bonus = Column(Integer, default=0)
+    str_temporary = Column(Integer, default=0)
+    dex_base = Column(Integer, default=10)
+    dex_bonus = Column(Integer, default=0)
+    dex_temporary = Column(Integer, default=0)
+    con_base = Column(Integer, default=10)
+    con_bonus = Column(Integer, default=0)
+    con_temporary = Column(Integer, default=0)
+    int_base = Column(Integer, default=10)
+    int_bonus = Column(Integer, default=0)
+    int_temporary = Column(Integer, default=0)
+    wis_base = Column(Integer, default=10)
+    wis_bonus = Column(Integer, default=0)
+    wis_temporary = Column(Integer, default=0)
+    cha_base = Column(Integer, default=10)
+    cha_bonus = Column(Integer, default=0)
+    cha_temporary = Column(Integer, default=0)
+    
+    armor_class = Column(Integer, default=12)
+    initiative_bonus = Column(Integer, default=0)
+    speed = Column(Integer, default=30)
+    proficiency_bonus = Column(Integer, default=2)
+    critical_range = Column(Integer, default=20)
+    critical_multiplier = Column(Integer, default=2)
+    
+    resources = Column(JSON, default='{}')
+    skills = Column(JSON, default='[]')
+    inventory = Column(JSON, default='[]')
+    equipment = Column(JSON, default='{}')
+    effects = Column(JSON, default='[]')
+    
+    level = Column(Integer, default=1)
+    experience = Column(Integer, default=0)
+    skill_points = Column(Integer, default=0)
+    perks = Column(JSON, default='[]')
+    achievements = Column(JSON, default='[]')
+    
+    description = Column(Text, default='')
+    biography = Column(Text, default='')
+    goals = Column(Text, default='')
+    faction = Column(String(50), default='')
+    religion = Column(String(50), default='')
+    occupation = Column(String(50), default='')
+    history = Column(Text, default='')
+    notes = Column(Text, default='')
+    
+    is_npc = Column(Boolean, default=False)
+    is_hostile = Column(Boolean, default=False)
+    
+    permissions = Column(JSON, default='{}')
+    
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
     owner = relationship("User", foreign_keys=[created_by])
-    skills = relationship("CharacterSkill", back_populates="character", cascade="all, delete-orphan")
-    inventory = relationship("CharacterInventory", back_populates="character", cascade="all, delete-orphan")
-    effects = relationship("CharacterEffect", back_populates="character", cascade="all, delete-orphan")
+    tokens = relationship("GameToken", backref="character")
 
-class CharacterSkill(Base):
-    __tablename__ = 'character_skills'
-    id = Column(Integer, primary_key=True)
-    character_id = Column(Integer, ForeignKey('characters.id'))
-    skill_id = Column(Integer)
-    is_prepared = Column(Boolean, default=False)
-    is_enabled = Column(Boolean, default=True)
-    cooldown = Column(Integer, default=0)
-    character = relationship("Character", back_populates="skills")
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'surname': self.surname,
+            'nickname': self.nickname,
+            'race': self.race,
+            'class': self.class_name,
+            'background': self.background,
+            'player_id': self.player_id,
+            'table_id': self.table_id,
+            'portrait': self.portrait,
+            'token': self.token,
+            'gender': self.gender,
+            'age': self.age,
+            'height': self.height,
+            'weight': self.weight,
+            'hair': self.hair,
+            'eyes': self.eyes,
+            'skin': self.skin,
+            'strength': {'base': self.str_base, 'bonus': self.str_bonus, 'temporary': self.str_temporary},
+            'dexterity': {'base': self.dex_base, 'bonus': self.dex_bonus, 'temporary': self.dex_temporary},
+            'constitution': {'base': self.con_base, 'bonus': self.con_bonus, 'temporary': self.con_temporary},
+            'intelligence': {'base': self.int_base, 'bonus': self.int_bonus, 'temporary': self.int_temporary},
+            'wisdom': {'base': self.wis_base, 'bonus': self.wis_bonus, 'temporary': self.wis_temporary},
+            'charisma': {'base': self.cha_base, 'bonus': self.cha_bonus, 'temporary': self.cha_temporary},
+            'armor_class': self.armor_class,
+            'initiative_bonus': self.initiative_bonus,
+            'speed': self.speed,
+            'proficiency_bonus': self.proficiency_bonus,
+            'resources': json.loads(self.resources) if self.resources else {},
+            'skills': json.loads(self.skills) if self.skills else [],
+            'inventory': json.loads(self.inventory) if self.inventory else [],
+            'equipment': json.loads(self.equipment) if self.equipment else {},
+            'effects': json.loads(self.effects) if self.effects else [],
+            'level': self.level,
+            'experience': self.experience,
+            'description': self.description,
+            'biography': self.biography,
+            'is_npc': self.is_npc
+        }
+    
+    def get_attribute(self, attr_name: str) -> int:
+        attr_map = {
+            'strength': ('str_base', 'str_bonus', 'str_temporary'),
+            'dexterity': ('dex_base', 'dex_bonus', 'dex_temporary'),
+            'constitution': ('con_base', 'con_bonus', 'con_temporary'),
+            'intelligence': ('int_base', 'int_bonus', 'int_temporary'),
+            'wisdom': ('wis_base', 'wis_bonus', 'wis_temporary'),
+            'charisma': ('cha_base', 'cha_bonus', 'cha_temporary')
+        }
+        base, bonus, temp = attr_map.get(attr_name, (None, None, None))
+        if base is None:
+            return 0
+        return getattr(self, base, 0) + getattr(self, bonus, 0) + getattr(self, temp, 0)
+    
+    def get_resource(self, resource_name: str) -> dict:
+        resources = json.loads(self.resources) if self.resources else {}
+        return resources.get(resource_name, {'current': 0, 'maximum': 0, 'temporary': 0, 'regeneration': 0})
+    
+    def set_resource(self, resource_name: str, value: dict):
+        resources = json.loads(self.resources) if self.resources else {}
+        resources[resource_name] = value
+        self.resources = json.dumps(resources)
 
-class CharacterInventory(Base):
-    __tablename__ = 'character_inventory'
-    id = Column(Integer, primary_key=True)
-    character_id = Column(Integer, ForeignKey('characters.id'))
-    item_id = Column(Integer)
-    quantity = Column(Integer, default=1)
-    equipped = Column(Boolean, default=False)
-    character = relationship("Character", back_populates="inventory")
-
-class CharacterEffect(Base):
-    __tablename__ = 'character_effects'
-    id = Column(Integer, primary_key=True)
-    character_id = Column(Integer, ForeignKey('characters.id'))
-    effect_id = Column(Integer)
-    duration = Column(Integer, default=0)
-    remaining_turns = Column(Integer, default=0)
-    stacks = Column(Integer, default=1)
-    character = relationship("Character", back_populates="effects")
+# ============================================================
+# 3. ИГРОВЫЕ СУЩНОСТИ
+# ============================================================
 
 class GameTable(Base):
     __tablename__ = 'game_tables'
@@ -153,20 +231,7 @@ class GameToken(Base):
     layer = Column(String, default='common')
     character_id = Column(Integer, ForeignKey('characters.id'), nullable=True)
     table = relationship("GameTable", backref="tokens")
-    character = relationship("Character", backref="tokens")
     description = Column(String, default='')
-    strength = Column(Integer, default=10)
-    dexterity = Column(Integer, default=10)
-    constitution = Column(Integer, default=10)
-    intelligence = Column(Integer, default=10)
-    wisdom = Column(Integer, default=10)
-    charisma = Column(Integer, default=10)
-    hp = Column(Integer, default=20)
-    max_hp = Column(Integer, default=20)
-    ac = Column(Integer, default=12)
-    level = Column(Integer, default=1)
-    race = Column(String, default='')
-    class_name = Column(String, default='')
 
 class PlayerGame(Base):
     __tablename__ = 'player_games'
@@ -209,6 +274,161 @@ class SessionLog(Base):
     data = Column(Text, default='{}')
     session = relationship("GameSession", back_populates="logs")
 
+# ============================================================
+# 4. PARSER SERVICE — НЕТ ИИ, ТОЛЬКО СТРУКТУРЫ
+# ============================================================
+
+class ParserService:
+    """
+    Сервис парсинга данных.
+    Работает ТОЛЬКО по заранее определённым шаблонам.
+    НИКАКОГО ИИ. НИКАКОЙ ГЕНЕРАЦИИ.
+    """
+    
+    @staticmethod
+    def parse_character(data: dict) -> dict:
+        """
+        Парсит карточку персонажа из словаря.
+        Возвращает структуру для создания Character.
+        """
+        result = {
+            'name': data.get('name', ''),
+            'surname': data.get('surname', ''),
+            'nickname': data.get('nickname', ''),
+            'race': data.get('race', ''),
+            'class_name': data.get('class', data.get('class_name', '')),
+            'background': data.get('background', ''),
+            'portrait': data.get('portrait', ''),
+            'token': data.get('token', ''),
+            'gender': data.get('gender', ''),
+            'age': data.get('age', 0),
+            'height': data.get('height', 0.0),
+            'weight': data.get('weight', 0.0),
+            'hair': data.get('hair', ''),
+            'eyes': data.get('eyes', ''),
+            'skin': data.get('skin', ''),
+            'str_base': data.get('strength', data.get('str_base', 10)),
+            'dex_base': data.get('dexterity', data.get('dex_base', 10)),
+            'con_base': data.get('constitution', data.get('con_base', 10)),
+            'int_base': data.get('intelligence', data.get('int_base', 10)),
+            'wis_base': data.get('wisdom', data.get('wis_base', 10)),
+            'cha_base': data.get('charisma', data.get('cha_base', 10)),
+            'armor_class': data.get('armor_class', 12),
+            'initiative_bonus': data.get('initiative_bonus', 0),
+            'speed': data.get('speed', 30),
+            'level': data.get('level', 1),
+            'experience': data.get('experience', 0),
+            'description': data.get('description', ''),
+            'biography': data.get('biography', ''),
+            'goals': data.get('goals', ''),
+            'faction': data.get('faction', ''),
+            'religion': data.get('religion', ''),
+            'occupation': data.get('occupation', ''),
+            'history': data.get('history', ''),
+            'notes': data.get('notes', ''),
+            'is_npc': data.get('is_npc', False),
+            'max_hp': data.get('max_hp', 20),
+            'max_mana': data.get('max_mana', 0),
+            'max_energy': data.get('max_energy', 0),
+            'max_rage': data.get('max_rage', 0)
+        }
+        return result
+    
+    @staticmethod
+    def parse_npc(data: dict) -> dict:
+        """
+        Парсит карточку NPC.
+        """
+        result = ParserService.parse_character(data)
+        result['is_npc'] = True
+        return result
+    
+    @staticmethod
+    def parse_item(data: dict) -> dict:
+        """
+        Парсит предмет.
+        """
+        return {
+            'name': data.get('name', ''),
+            'type': data.get('type', ''),
+            'rarity': data.get('rarity', 'common'),
+            'description': data.get('description', ''),
+            'weight': data.get('weight', 0.0),
+            'value': data.get('value', 0),
+            'quantity': data.get('quantity', 1),
+            'durability': data.get('durability', 100),
+            'charges': data.get('charges', 0),
+            'damage': data.get('damage', {}),
+            'armor': data.get('armor', {}),
+            'effects': data.get('effects', [])
+        }
+    
+    @staticmethod
+    def parse_spell(data: dict) -> dict:
+        """
+        Парсит заклинание.
+        """
+        return {
+            'name': data.get('name', ''),
+            'level': data.get('level', 1),
+            'school': data.get('school', ''),
+            'range': data.get('range', 0),
+            'duration': data.get('duration', ''),
+            'casting_time': data.get('casting_time', ''),
+            'damage': data.get('damage', {}),
+            'description': data.get('description', ''),
+            'components': data.get('components', {}),
+            'is_ritual': data.get('is_ritual', False),
+            'is_concentration': data.get('is_concentration', False)
+        }
+    
+    @staticmethod
+    def parse_scenario(data: dict) -> dict:
+        """
+        Парсит сценарий из JSON.
+        """
+        return {
+            'name': data.get('name', ''),
+            'description': data.get('description', ''),
+            'locations': data.get('locations', []),
+            'scenes': data.get('scenes', []),
+            'npcs': data.get('npcs', []),
+            'monsters': data.get('monsters', []),
+            'items': data.get('items', []),
+            'maps': data.get('maps', []),
+            'tokens': data.get('tokens', []),
+            'triggers': data.get('triggers', []),
+            'effects': data.get('effects', [])
+        }
+    
+    @staticmethod
+    def parse_json_file(file_content: str) -> dict:
+        """
+        Парсит JSON-файл.
+        """
+        try:
+            data = json.loads(file_content)
+            return data
+        except json.JSONDecodeError as e:
+            return {'error': f'Ошибка парсинга JSON: {str(e)}'}
+    
+    @staticmethod
+    def validate_character(data: dict) -> dict:
+        """
+        Валидирует данные персонажа.
+        Возвращает {'valid': True/False, 'errors': [...]}
+        """
+        errors = []
+        if not data.get('name'):
+            errors.append('Отсутствует имя персонажа')
+        if data.get('level', 0) < 1:
+            errors.append('Уровень должен быть не меньше 1')
+        return {'valid': len(errors) == 0, 'errors': errors}
+
+# ============================================================
+# 5. МИГРАЦИЯ
+# ============================================================
+
 def migrate_database():
     session = Session()
     try:
@@ -218,12 +438,6 @@ def migrate_database():
             print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
-        columns = [col['name'] for col in inspector.get_columns('game_tokens')]
-        if 'character_id' not in columns:
-            print("🔄 Добавляем character_id в game_tokens...")
-            session.execute("ALTER TABLE game_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id)")
-            session.commit()
-            print("✅ Связь добавлена!")
         if 'game_sessions' not in inspector.get_table_names():
             print("🔄 Создаём таблицы Game Session...")
             Base.metadata.create_all(engine)
@@ -236,6 +450,10 @@ def migrate_database():
 Base.metadata.create_all(engine)
 migrate_database()
 
+# ============================================================
+# 6. FASTAPI
+# ============================================================
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -246,6 +464,10 @@ os.makedirs(AVATAR_DIR, exist_ok=True)
 os.makedirs(MAP_DIR, exist_ok=True)
 
 connections = {}
+
+# ============================================================
+# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -289,6 +511,10 @@ def get_current_user(request):
 def generate_table_link():
     return secrets.token_urlsafe(8)
 
+# ============================================================
+# 8. CHARACTER RUNTIME (ТОЛЬКО ДЛЯ ИГРЫ)
+# ============================================================
+
 @dataclass
 class CharacterRuntime:
     runtime_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -299,36 +525,14 @@ class CharacterRuntime:
     temporary_hp: int = 0
     max_hp: int = 20
     armor_class: int = 12
-    armor_class_bonus: int = 0
     speed: int = 30
     movement_left: int = 30
-    can_fly: bool = False
-    can_swim: bool = False
     action_used: bool = False
     bonus_action_used: bool = False
     reaction_used: bool = False
-    free_action_used: bool = False
-    movement_used: bool = False
     initiative: int = 0
-    initiative_order: List[int] = field(default_factory=list)
-    round_number: int = 0
-    turn_number: int = 0
-    is_concentrating: bool = False
-    concentration_spell: str = ''
-    concentration_save_bonus: int = 0
     is_alive: bool = True
     is_unconscious: bool = False
-    is_dead: bool = False
-    is_prone: bool = False
-    is_invisible: bool = False
-    is_stunned: bool = False
-    is_poisoned: bool = False
-    is_blinded: bool = False
-    is_restrained: bool = False
-    is_charmed: bool = False
-    is_frightened: bool = False
-    death_saves_success: int = 0
-    death_saves_fail: int = 0
     conditions: List[str] = field(default_factory=list)
     active_effects: List[Dict] = field(default_factory=list)
     mana: int = 0
@@ -337,17 +541,6 @@ class CharacterRuntime:
     max_energy: int = 0
     rage: int = 0
     max_rage: int = 0
-    luck: int = 0
-    inspiration: bool = False
-    hit_dice: str = '1d8'
-    hit_dice_used: int = 0
-    spell_slots: Dict[str, int] = field(default_factory=dict)
-    sorcery_points: int = 0
-    ki_points: int = 0
-    arrows: int = 0
-    bolts: int = 0
-    bombs: int = 0
-    charges: Dict[str, int] = field(default_factory=dict)
     x: float = 0
     y: float = 0
     strength: int = 10
@@ -380,16 +573,9 @@ class CharacterRuntime:
             'bonus_action_used': self.bonus_action_used,
             'reaction_used': self.reaction_used,
             'initiative': self.initiative,
-            'round_number': self.round_number,
-            'turn_number': self.turn_number,
-            'is_concentrating': self.is_concentrating,
-            'concentration_spell': self.concentration_spell,
             'is_alive': self.is_alive,
             'is_unconscious': self.is_unconscious,
-            'is_dead': self.is_dead,
             'conditions': self.conditions,
-            'death_saves_success': self.death_saves_success,
-            'death_saves_fail': self.death_saves_fail,
             'active_effects': self.active_effects,
             'mana': self.mana,
             'max_mana': self.max_mana,
@@ -397,17 +583,6 @@ class CharacterRuntime:
             'max_energy': self.max_energy,
             'rage': self.rage,
             'max_rage': self.max_rage,
-            'luck': self.luck,
-            'inspiration': self.inspiration,
-            'hit_dice': self.hit_dice,
-            'hit_dice_used': self.hit_dice_used,
-            'spell_slots': self.spell_slots,
-            'sorcery_points': self.sorcery_points,
-            'ki_points': self.ki_points,
-            'arrows': self.arrows,
-            'bolts': self.bolts,
-            'bombs': self.bombs,
-            'charges': self.charges,
             'x': self.x,
             'y': self.y,
             'strength': self.strength,
@@ -452,114 +627,6 @@ class CharacterRuntime:
         self.last_updated = datetime.now()
         return self.current_hp - old_hp
 
-    def use_action(self) -> bool:
-        if self.action_used:
-            return False
-        self.action_used = True
-        self.last_updated = datetime.now()
-        return True
-
-    def use_bonus_action(self) -> bool:
-        if self.bonus_action_used:
-            return False
-        self.bonus_action_used = True
-        self.last_updated = datetime.now()
-        return True
-
-    def use_reaction(self) -> bool:
-        if self.reaction_used:
-            return False
-        self.reaction_used = True
-        self.last_updated = datetime.now()
-        return True
-
-    def reset_actions(self):
-        self.action_used = False
-        self.bonus_action_used = False
-        self.reaction_used = False
-        self.movement_left = self.speed
-        self.last_updated = datetime.now()
-
-    def use_movement(self, distance: int) -> bool:
-        if self.movement_left < distance:
-            return False
-        self.movement_left -= distance
-        self.last_updated = datetime.now()
-        return True
-
-    def start_concentration(self, spell_name: str) -> bool:
-        if self.is_concentrating:
-            return False
-        self.is_concentrating = True
-        self.concentration_spell = spell_name
-        self.last_updated = datetime.now()
-        return True
-
-    def break_concentration(self):
-        self.is_concentrating = False
-        self.concentration_spell = ''
-        self.last_updated = datetime.now()
-
-    def check_concentration(self, damage: int) -> bool:
-        if not self.is_concentrating:
-            return True
-        dc = max(10, damage // 2)
-        roll = random.randint(1, 20) + self.con_save
-        if roll >= dc:
-            return True
-        else:
-            self.break_concentration()
-            return False
-
-    def add_condition(self, condition: str):
-        if condition not in self.conditions:
-            self.conditions.append(condition)
-            self.last_updated = datetime.now()
-            self._update_condition_flags()
-
-    def remove_condition(self, condition: str):
-        if condition in self.conditions:
-            self.conditions.remove(condition)
-            self.last_updated = datetime.now()
-            self._update_condition_flags()
-
-    def _update_condition_flags(self):
-        self.is_prone = 'prone' in self.conditions
-        self.is_invisible = 'invisible' in self.conditions
-        self.is_stunned = 'stunned' in self.conditions
-        self.is_poisoned = 'poisoned' in self.conditions
-        self.is_blinded = 'blinded' in self.conditions
-        self.is_restrained = 'restrained' in self.conditions
-        self.is_charmed = 'charmed' in self.conditions
-        self.is_frightened = 'frightened' in self.conditions
-
-    def add_effect(self, effect: Dict):
-        if not effect.get('stackable', False):
-            self.active_effects = [e for e in self.active_effects if e.get('effect') != effect.get('effect')]
-        self.active_effects.append(effect)
-        self.last_updated = datetime.now()
-
-    def remove_effect(self, effect_type: str):
-        self.active_effects = [e for e in self.active_effects if e.get('effect') != effect_type]
-        self.last_updated = datetime.now()
-
-    def tick_effects(self):
-        expired = []
-        for i, effect in enumerate(self.active_effects):
-            if effect.get('duration', 0) > 0:
-                effect['duration'] -= 1
-                if effect['duration'] <= 0:
-                    expired.append(i)
-        for i in reversed(expired):
-            self.active_effects.pop(i)
-        self.last_updated = datetime.now()
-
-    def get_effect(self, effect_type: str) -> Optional[Dict]:
-        for effect in self.active_effects:
-            if effect.get('effect') == effect_type:
-                return effect
-        return None
-
 class RuntimeManager:
     def __init__(self):
         self._runtimes: Dict[str, CharacterRuntime] = {}
@@ -575,33 +642,37 @@ class RuntimeManager:
         session.close()
         if not character:
             raise ValueError(f"Character {character_id} not found")
+        resources = json.loads(character.resources) if character.resources else {}
+        hp = resources.get('hp', {'current': 20, 'maximum': 20})
+        mana = resources.get('mana', {'current': 0, 'maximum': 0})
+        energy = resources.get('energy', {'current': 0, 'maximum': 0})
+        rage = resources.get('rage', {'current': 0, 'maximum': 0})
         runtime = CharacterRuntime(
             character_id=character_id,
             player_id=player_id,
             table_link=table_link,
-            current_hp=character.max_hp,
-            max_hp=character.max_hp,
-            armor_class=character.base_ac,
+            current_hp=hp.get('current', 20),
+            max_hp=hp.get('maximum', 20),
+            armor_class=character.armor_class,
             speed=character.speed,
-            mana=0,
-            max_mana=character.max_mana,
-            energy=0,
-            max_energy=character.max_energy,
-            rage=0,
-            max_rage=character.max_rage,
-            hit_dice=character.hit_dice,
-            strength=character.strength,
-            dexterity=character.dexterity,
-            constitution=character.constitution,
-            intelligence=character.intelligence,
-            wisdom=character.wisdom,
-            charisma=character.charisma,
-            str_save=character.str_save,
-            dex_save=character.dex_save,
-            con_save=character.con_save,
-            int_save=character.int_save,
-            wis_save=character.wis_save,
-            cha_save=character.cha_save
+            mana=mana.get('current', 0),
+            max_mana=mana.get('maximum', 0),
+            energy=energy.get('current', 0),
+            max_energy=energy.get('maximum', 0),
+            rage=rage.get('current', 0),
+            max_rage=rage.get('maximum', 0),
+            strength=character.str_base,
+            dexterity=character.dex_base,
+            constitution=character.con_base,
+            intelligence=character.int_base,
+            wisdom=character.wis_base,
+            charisma=character.cha_base,
+            str_save=character.str_base // 2 - 5,
+            dex_save=character.dex_base // 2 - 5,
+            con_save=character.con_base // 2 - 5,
+            int_save=character.int_base // 2 - 5,
+            wis_save=character.wis_base // 2 - 5,
+            cha_save=character.cha_base // 2 - 5
         )
         self._runtimes[runtime.runtime_id] = runtime
         self._character_runtimes[character_id] = runtime.runtime_id
@@ -662,14 +733,32 @@ class RuntimeManager:
             character = session.query(Character).filter_by(id=runtime.character_id).first()
             if not character:
                 return False
-            character.current_hp = runtime.current_hp
-            character.temporary_hp = runtime.temporary_hp
+            character.set_resource('hp', {
+                'current': runtime.current_hp,
+                'maximum': runtime.max_hp,
+                'temporary': runtime.temporary_hp,
+                'regeneration': 0
+            })
+            character.set_resource('mana', {
+                'current': runtime.mana,
+                'maximum': runtime.max_mana,
+                'temporary': 0,
+                'regeneration': 0
+            })
+            character.set_resource('energy', {
+                'current': runtime.energy,
+                'maximum': runtime.max_energy,
+                'temporary': 0,
+                'regeneration': 0
+            })
+            character.set_resource('rage', {
+                'current': runtime.rage,
+                'maximum': runtime.max_rage,
+                'temporary': 0,
+                'regeneration': 0
+            })
             character.armor_class = runtime.armor_class
-            character.mana = runtime.mana
-            character.energy = runtime.energy
-            character.rage = runtime.rage
-            character.luck = runtime.luck
-            character.inspiration = runtime.inspiration
+            character.speed = runtime.speed
             session.commit()
             return True
         except Exception as e:
@@ -680,6 +769,10 @@ class RuntimeManager:
             session.close()
 
 runtime_manager = RuntimeManager()
+
+# ============================================================
+# 9. COMBAT ENGINE — ТОЛЬКО ВЫЧИСЛЕНИЯ
+# ============================================================
 
 class CombatEngine:
     ABILITIES = {
@@ -692,8 +785,7 @@ class CombatEngine:
             'damage': {'dice': '8d6', 'type': 'fire'},
             'save': {'ability': 'dex', 'dc': 15},
             'effects': ['burn'],
-            'animation': 'fireball',
-            'sound': 'fireball.wav'
+            'animation': 'fireball'
         },
         'sword_attack': {
             'id': 'sword_attack',
@@ -704,8 +796,7 @@ class CombatEngine:
             'damage': {'dice': '1d8+3', 'type': 'slashing'},
             'save': None,
             'effects': [],
-            'animation': 'slash',
-            'sound': 'sword.wav'
+            'animation': 'slash'
         },
         'heal': {
             'id': 'heal',
@@ -716,8 +807,7 @@ class CombatEngine:
             'damage': {'dice': '2d8+4', 'type': 'healing'},
             'save': None,
             'effects': ['healing'],
-            'animation': 'heal',
-            'sound': 'heal.wav'
+            'animation': 'heal'
         },
         'firebolt': {
             'id': 'firebolt',
@@ -728,8 +818,7 @@ class CombatEngine:
             'damage': {'dice': '2d6', 'type': 'fire'},
             'save': None,
             'effects': ['burn'],
-            'animation': 'firebolt',
-            'sound': 'firebolt.wav'
+            'animation': 'firebolt'
         }
     }
     
@@ -765,12 +854,6 @@ class CombatEngine:
             return False, "Персонаж мёртв"
         if runtime.is_unconscious:
             return False, "Персонаж без сознания"
-        if runtime.is_stunned:
-            return False, "Персонаж оглушён"
-        if runtime.is_dead:
-            return False, "Персонаж мёртв"
-        if 'paralyzed' in runtime.conditions:
-            return False, "Персонаж парализован"
         return True, "OK"
     
     @staticmethod
@@ -784,8 +867,6 @@ class CombatEngine:
             return False, "Реакция уже использована"
         if cost.get('mana', 0) and runtime.mana < cost['mana']:
             return False, f"Недостаточно маны (нужно {cost['mana']})"
-        if cost.get('energy', 0) and runtime.energy < cost['energy']:
-            return False, f"Недостаточно энергии (нужно {cost['energy']})"
         return True, "OK"
     
     @staticmethod
@@ -809,81 +890,86 @@ class CombatEngine:
         return success, roll
     
     @staticmethod
-    def calculate_damage(dice_str: str, damage_type: str, target: CharacterRuntime) -> int:
-        damage = CombatEngine.roll_dice(dice_str)
-        return max(0, damage)
-    
-    @staticmethod
     def apply_effects(target: CharacterRuntime, effects: list):
         for effect in effects:
             if effect == 'burn':
-                target.add_effect({
+                target.active_effects.append({
                     'effect': 'burn',
                     'duration': 3,
-                    'damage': '1d6',
-                    'stackable': False
+                    'damage': '1d6'
                 })
-            elif effect == 'healing':
-                pass
     
     @staticmethod
     def resolve_action(
         source_runtime: CharacterRuntime,
         target_runtime: CharacterRuntime,
         ability_id: str,
-        table_link: str
+        table_link: str,
+        gm_confirmed: bool = True
     ) -> dict:
+        if not gm_confirmed:
+            return {
+                'success': False,
+                'error': 'Действие требует подтверждения ГМ'
+            }
+        
         ability = CombatEngine.ABILITIES.get(ability_id)
         if not ability:
             return {'success': False, 'error': f"Способность {ability_id} не найдена"}
+        
         can_act, msg = CombatEngine.check_conditions(source_runtime)
         if not can_act:
             return {'success': False, 'error': msg}
+        
         has_resources, msg = CombatEngine.check_resources(source_runtime, ability)
         if not has_resources:
             return {'success': False, 'error': msg}
+        
         source_pos = (source_runtime.x, source_runtime.y)
         target_pos = (target_runtime.x, target_runtime.y)
         distance = CombatEngine.calculate_distance(source_pos, target_pos)
         if distance > ability.get('range', 999):
             return {'success': False, 'error': f"Цель слишком далеко (дистанция: {distance:.1f}, нужно: {ability['range']})"}
+        
         hit = False
         save_success = False
         damage = 0
         roll_info = {}
+        
         if 'save' in ability:
             save_success, save_roll = CombatEngine.calculate_saving_throw(target_runtime, ability)
             roll_info['save_roll'] = save_roll
             roll_info['save_dc'] = ability['save']['dc']
             roll_info['save_ability'] = ability['save']['ability']
             if not save_success:
-                damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime)
+                damage = CombatEngine.roll_dice(ability['damage']['dice'])
                 hit = True
             else:
-                damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime) // 2
+                damage = CombatEngine.roll_dice(ability['damage']['dice']) // 2
                 hit = True
         else:
-            damage = CombatEngine.calculate_damage(ability['damage']['dice'], ability['damage']['type'], target_runtime)
+            damage = CombatEngine.roll_dice(ability['damage']['dice'])
             hit = True
+        
         actual_damage = 0
         if hit and damage > 0:
             if ability['damage']['type'] == 'healing':
                 actual_damage = target_runtime.heal(damage)
             else:
                 actual_damage = target_runtime.take_damage(damage)
-        if actual_damage > 0:
-            target_runtime.check_concentration(actual_damage)
+        
         if hit:
             CombatEngine.apply_effects(target_runtime, ability.get('effects', []))
+        
         cost = ability.get('cost', {})
         if cost.get('action', 0):
             source_runtime.action_used = True
         if cost.get('mana', 0):
             source_runtime.mana -= cost['mana']
-        if cost.get('energy', 0):
-            source_runtime.energy -= cost['energy']
+        
         source_runtime.last_updated = datetime.now()
         target_runtime.last_updated = datetime.now()
+        
         return {
             'success': True,
             'source': source_runtime.to_dict(),
@@ -892,8 +978,7 @@ class CombatEngine:
                 'id': ability_id,
                 'name': ability['name'],
                 'type': ability['type'],
-                'animation': ability.get('animation', 'default'),
-                'sound': ability.get('sound', 'default.wav')
+                'animation': ability.get('animation', 'default')
             },
             'roll_info': roll_info,
             'hit': hit,
@@ -901,223 +986,13 @@ class CombatEngine:
             'damage_type': ability['damage']['type'],
             'effects_applied': ability.get('effects', []),
             'save_success': save_success if 'save' in ability else None,
-            'distance': distance
+            'distance': distance,
+            'gm_confirmed': gm_confirmed
         }
 
-@app.post("/api/character/create")
-async def create_character(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    session = Session()
-    try:
-        character = Character(
-            name=data.get('name', ''),
-            surname=data.get('surname', ''),
-            nickname=data.get('nickname', ''),
-            avatar=data.get('avatar', ''),
-            description=data.get('description', ''),
-            biography=data.get('biography', ''),
-            age=data.get('age', 0),
-            gender=data.get('gender', ''),
-            race=data.get('race', ''),
-            class_name=data.get('class_name', ''),
-            background=data.get('background', ''),
-            alignment=data.get('alignment', ''),
-            level=data.get('level', 1),
-            experience=data.get('experience', 0),
-            max_hp=data.get('max_hp', 20),
-            base_ac=data.get('base_ac', 12),
-            speed=data.get('speed', 30),
-            initiative_bonus=data.get('initiative_bonus', 0),
-            strength=data.get('strength', 10),
-            dexterity=data.get('dexterity', 10),
-            constitution=data.get('constitution', 10),
-            intelligence=data.get('intelligence', 10),
-            wisdom=data.get('wisdom', 10),
-            charisma=data.get('charisma', 10),
-            str_save=data.get('str_save', 0),
-            dex_save=data.get('dex_save', 0),
-            con_save=data.get('con_save', 0),
-            int_save=data.get('int_save', 0),
-            wis_save=data.get('wis_save', 0),
-            cha_save=data.get('cha_save', 0),
-            max_mana=data.get('max_mana', 0),
-            max_energy=data.get('max_energy', 0),
-            max_rage=data.get('max_rage', 0),
-            hit_dice=data.get('hit_dice', '1d8'),
-            created_by=user.id
-        )
-        session.add(character)
-        session.commit()
-        return {"success": True, "character_id": character.id}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.get("/api/character/{character_id}")
-async def get_character(character_id: int):
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        return {"success": True, "character": {
-            "id": character.id,
-            "name": character.name,
-            "surname": character.surname,
-            "nickname": character.nickname,
-            "avatar": character.avatar,
-            "description": character.description,
-            "biography": character.biography,
-            "age": character.age,
-            "gender": character.gender,
-            "race": character.race,
-            "class_name": character.class_name,
-            "background": character.background,
-            "alignment": character.alignment,
-            "level": character.level,
-            "experience": character.experience,
-            "max_hp": character.max_hp,
-            "base_ac": character.base_ac,
-            "speed": character.speed,
-            "initiative_bonus": character.initiative_bonus,
-            "strength": character.strength,
-            "dexterity": character.dexterity,
-            "constitution": character.constitution,
-            "intelligence": character.intelligence,
-            "wisdom": character.wisdom,
-            "charisma": character.charisma,
-            "str_save": character.str_save,
-            "dex_save": character.dex_save,
-            "con_save": character.con_save,
-            "int_save": character.int_save,
-            "wis_save": character.wis_save,
-            "cha_save": character.cha_save,
-            "max_mana": character.max_mana,
-            "max_energy": character.max_energy,
-            "max_rage": character.max_rage,
-            "hit_dice": character.hit_dice
-        }}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/runtime/create")
-async def create_runtime(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    character_id = data.get('character_id')
-    table_link = data.get('table_link')
-    if not character_id or not table_link:
-        return {"success": False, "message": "Не указан character_id или table_link"}
-    try:
-        runtime = runtime_manager.create_runtime(character_id, user.id, table_link)
-        return {"success": True, "runtime_id": runtime.runtime_id, "runtime": runtime.to_dict()}
-    except ValueError as e:
-        return {"success": False, "message": str(e)}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-@app.get("/api/runtime/{runtime_id}")
-async def get_runtime(runtime_id: str):
-    runtime = runtime_manager.get_runtime(runtime_id)
-    if not runtime:
-        return {"success": False, "message": "Runtime не найден"}
-    return {"success": True, "runtime": runtime.to_dict()}
-
-@app.post("/api/runtime/update")
-async def update_runtime(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    runtime_id = data.get('runtime_id')
-    if not runtime_id:
-        return {"success": False, "message": "Не указан runtime_id"}
-    update_data = {k: v for k, v in data.items() if k != 'runtime_id'}
-    runtime = runtime_manager.update_runtime(runtime_id, **update_data)
-    if not runtime:
-        return {"success": False, "message": "Runtime не найден"}
-    return {"success": True, "runtime": runtime.to_dict()}
-
-@app.post("/api/runtime/save")
-async def save_runtime(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    runtime_id = data.get('runtime_id')
-    if not runtime_id:
-        return {"success": False, "message": "Не указан runtime_id"}
-    success = runtime_manager.save_runtime_to_character(runtime_id)
-    if not success:
-        return {"success": False, "message": "Не удалось сохранить Runtime"}
-    return {"success": True, "message": "Runtime сохранён"}
-
-@app.post("/api/runtime/delete")
-async def delete_runtime(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    runtime_id = data.get('runtime_id')
-    if not runtime_id:
-        return {"success": False, "message": "Не указан runtime_id"}
-    success = runtime_manager.delete_runtime(runtime_id)
-    if not success:
-        return {"success": False, "message": "Runtime не найден"}
-    return {"success": True, "message": "Runtime удалён"}
-
-@app.post("/api/combat/action")
-async def combat_action(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    source_runtime_id = data.get('source_runtime_id')
-    target_runtime_id = data.get('target_runtime_id')
-    ability_id = data.get('ability_id')
-    if not source_runtime_id or not target_runtime_id or not ability_id:
-        return {"success": False, "message": "Не указаны source_runtime_id, target_runtime_id или ability_id"}
-    source_runtime = runtime_manager.get_runtime(source_runtime_id)
-    target_runtime = runtime_manager.get_runtime(target_runtime_id)
-    if not source_runtime:
-        return {"success": False, "message": "Источник не найден"}
-    if not target_runtime:
-        return {"success": False, "message": "Цель не найдена"}
-    result = CombatEngine.resolve_action(
-        source_runtime,
-        target_runtime,
-        ability_id,
-        data.get('table_link', '')
-    )
-    if not result.get('success'):
-        return result
-    table_link = data.get('table_link')
-    if table_link and table_link in connections:
-        for ws in connections[table_link]:
-            try:
-                await ws.send_text(json.dumps({
-                    'type': 'combat_result',
-                    'result': result
-                }))
-            except:
-                pass
-    runtime_manager.save_runtime_to_character(source_runtime_id)
-    runtime_manager.save_runtime_to_character(target_runtime_id)
-    return {'success': True, 'result': result}
-
-@app.get("/api/combat/abilities")
-async def get_abilities():
-    return {'success': True, 'abilities': list(CombatEngine.ABILITIES.values())}
-
-@app.get("/api/combat/ability/{ability_id}")
-async def get_ability(ability_id: str):
-    ability = CombatEngine.ABILITIES.get(ability_id)
-    if not ability:
-        return {"success": False, "message": "Способность не найдена"}
-    return {"success": True, "ability": ability}
+# ============================================================
+# 10. SESSION MANAGER
+# ============================================================
 
 class GameSessionRuntime:
     def __init__(self, session_id: str, name: str, gm_id: int, table_link: str):
@@ -1131,7 +1006,6 @@ class GameSessionRuntime:
         self.finished_at = None
         self.current_round = 0
         self.current_turn = 0
-        self.current_player_id = None
         self.players: Dict[int, 'PlayerSession'] = {}
         self.runtimes: Dict[str, CharacterRuntime] = {}
         self.logs: List[Dict] = []
@@ -1146,12 +1020,10 @@ class GameSessionRuntime:
             'state': self.state,
             'current_round': self.current_round,
             'current_turn': self.current_turn,
-            'current_player_id': self.current_player_id,
             'players_count': len(self.players),
             'runtimes_count': len(self.runtimes),
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'finished_at': self.finished_at.isoformat() if self.finished_at else None
+            'started_at': self.started_at.isoformat() if self.started_at else None
         }
 
     def add_player(self, player_session: 'PlayerSession') -> bool:
@@ -1172,7 +1044,6 @@ class GameSessionRuntime:
         if runtime.runtime_id in self.runtimes:
             return False
         self.runtimes[runtime.runtime_id] = runtime
-        self.log_event('runtime_added', runtime.character_id, f"Runtime {runtime.character_id} добавлен")
         return True
 
     def log_event(self, event_type: str, actor_id: int, message: str, data: dict = None):
@@ -1186,23 +1057,6 @@ class GameSessionRuntime:
         if len(self.logs) > 1000:
             self.logs = self.logs[-1000:]
 
-    def start_session(self) -> bool:
-        if self.state not in ['LOBBY', 'WAITING_PLAYERS']:
-            return False
-        self.state = 'PLAYING'
-        self.started_at = datetime.now()
-        self.log_event('session_started', self.gm_id, "Сессия начата")
-        return True
-
-    def finish_session(self) -> bool:
-        if self.state == 'FINISHED':
-            return False
-        self.state = 'FINISHED'
-        self.finished_at = datetime.now()
-        self.is_active = False
-        self.log_event('session_finished', self.gm_id, "Сессия завершена")
-        return True
-
 class PlayerSession:
     def __init__(self, player_id: int, player_name: str, connection_id: str = None):
         self.player_id = player_id
@@ -1211,17 +1065,6 @@ class PlayerSession:
         self.character_runtime_id: Optional[str] = None
         self.ready = False
         self.online = True
-        self.joined_at = datetime.now()
-
-    def to_dict(self) -> dict:
-        return {
-            'player_id': self.player_id,
-            'player_name': self.player_name,
-            'character_runtime_id': self.character_runtime_id,
-            'ready': self.ready,
-            'online': self.online,
-            'joined_at': self.joined_at.isoformat() if self.joined_at else None
-        }
 
 class SessionManager:
     def __init__(self):
@@ -1283,9 +1126,6 @@ class SessionManager:
             return True
         return False
 
-    def get_all_sessions(self) -> List[GameSessionRuntime]:
-        return list(self._sessions.values())
-
     def get_session_logs(self, session_id: str, limit: int = 50) -> List[Dict]:
         session = self._sessions.get(session_id)
         if not session:
@@ -1293,6 +1133,363 @@ class SessionManager:
         return session.logs[-limit:]
 
 session_manager = SessionManager()
+
+# ============================================================
+# 11. API: CHARACTERS
+# ============================================================
+
+@app.post("/api/character/create")
+async def create_character(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    session = Session()
+    try:
+        character = Character(
+            name=data.get('name', ''),
+            surname=data.get('surname', ''),
+            nickname=data.get('nickname', ''),
+            race=data.get('race', ''),
+            class_name=data.get('class', ''),
+            background=data.get('background', ''),
+            player_id=user.id,
+            portrait=data.get('portrait', ''),
+            token=data.get('token', ''),
+            gender=data.get('gender', ''),
+            age=data.get('age', 0),
+            height=data.get('height', 0.0),
+            weight=data.get('weight', 0.0),
+            hair=data.get('hair', ''),
+            eyes=data.get('eyes', ''),
+            skin=data.get('skin', ''),
+            str_base=data.get('strength', 10),
+            dex_base=data.get('dexterity', 10),
+            con_base=data.get('constitution', 10),
+            int_base=data.get('intelligence', 10),
+            wis_base=data.get('wisdom', 10),
+            cha_base=data.get('charisma', 10),
+            armor_class=data.get('armor_class', 12),
+            initiative_bonus=data.get('initiative_bonus', 0),
+            speed=data.get('speed', 30),
+            proficiency_bonus=data.get('proficiency_bonus', 2),
+            level=data.get('level', 1),
+            experience=data.get('experience', 0),
+            description=data.get('description', ''),
+            biography=data.get('biography', ''),
+            goals=data.get('goals', ''),
+            faction=data.get('faction', ''),
+            religion=data.get('religion', ''),
+            occupation=data.get('occupation', ''),
+            history=data.get('history', ''),
+            notes=data.get('notes', ''),
+            is_npc=data.get('is_npc', False),
+            created_by=user.id
+        )
+        character.resources = json.dumps({
+            'hp': {'current': data.get('max_hp', 20), 'maximum': data.get('max_hp', 20), 'temporary': 0, 'regeneration': 0},
+            'mana': {'current': data.get('max_mana', 0), 'maximum': data.get('max_mana', 0), 'temporary': 0, 'regeneration': 0},
+            'energy': {'current': data.get('max_energy', 0), 'maximum': data.get('max_energy', 0), 'temporary': 0, 'regeneration': 0},
+            'rage': {'current': data.get('max_rage', 0), 'maximum': data.get('max_rage', 0), 'temporary': 0, 'regeneration': 0}
+        })
+        character.permissions = json.dumps({
+            'can_move': True, 'can_attack': True, 'can_cast': True,
+            'can_trade': True, 'can_speak': True, 'can_loot': True
+        })
+        character.inventory = json.dumps([])
+        character.equipment = json.dumps({})
+        character.effects = json.dumps([])
+        character.skills = json.dumps([])
+        character.perks = json.dumps([])
+        character.achievements = json.dumps([])
+        session.add(character)
+        session.commit()
+        return {"success": True, "character_id": character.id}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.get("/api/character/{character_id}")
+async def get_character(character_id: int):
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        return {"success": True, "character": character.to_dict()}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.put("/api/character/{character_id}")
+async def update_character(character_id: int, data: dict):
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        for key, value in data.items():
+            if hasattr(character, key):
+                setattr(character, key, value)
+        session.commit()
+        return {"success": True, "character": character.to_dict()}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+# ============================================================
+# 12. API: PARSER (БЕЗ ИИ)
+# ============================================================
+
+@app.post("/api/parse/character")
+async def parse_character(request: Request, data: dict):
+    """Парсит карточку персонажа из JSON."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    parsed = ParserService.parse_character(data)
+    validation = ParserService.validate_character(parsed)
+    
+    if not validation['valid']:
+        return {
+            'success': False,
+            'message': 'Ошибки валидации',
+            'errors': validation['errors'],
+            'parsed_data': parsed
+        }
+    
+    return {
+        'success': True,
+        'parsed_data': parsed,
+        'validation': validation
+    }
+
+@app.post("/api/parse/npc")
+async def parse_npc(request: Request, data: dict):
+    """Парсит карточку NPC из JSON."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    parsed = ParserService.parse_npc(data)
+    validation = ParserService.validate_character(parsed)
+    
+    if not validation['valid']:
+        return {
+            'success': False,
+            'message': 'Ошибки валидации',
+            'errors': validation['errors'],
+            'parsed_data': parsed
+        }
+    
+    return {
+        'success': True,
+        'parsed_data': parsed,
+        'validation': validation
+    }
+
+@app.post("/api/parse/item")
+async def parse_item(request: Request, data: dict):
+    """Парсит предмет из JSON."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    parsed = ParserService.parse_item(data)
+    return {
+        'success': True,
+        'parsed_data': parsed
+    }
+
+@app.post("/api/parse/spell")
+async def parse_spell(request: Request, data: dict):
+    """Парсит заклинание из JSON."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    parsed = ParserService.parse_spell(data)
+    return {
+        'success': True,
+        'parsed_data': parsed
+    }
+
+@app.post("/api/parse/scenario")
+async def parse_scenario(request: Request, data: dict):
+    """Парсит сценарий из JSON."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    parsed = ParserService.parse_scenario(data)
+    return {
+        'success': True,
+        'parsed_data': parsed,
+        'preview': {
+            'name': parsed.get('name', ''),
+            'locations_count': len(parsed.get('locations', [])),
+            'scenes_count': len(parsed.get('scenes', [])),
+            'npcs_count': len(parsed.get('npcs', []))
+        }
+    }
+
+@app.post("/api/parse/json")
+async def parse_json(request: Request, data: dict):
+    """Парсит JSON-файл."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    content = data.get('content', '')
+    if not content:
+        return {"success": False, "message": "Нет содержимого для парсинга"}
+    
+    result = ParserService.parse_json_file(content)
+    if 'error' in result:
+        return {"success": False, "message": result['error']}
+    
+    return {
+        'success': True,
+        'parsed_data': result,
+        'keys': list(result.keys()) if isinstance(result, dict) else None
+    }
+
+@app.post("/api/parse/validate")
+async def validate_character_data(request: Request, data: dict):
+    """Валидирует данные персонажа."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    validation = ParserService.validate_character(data)
+    return {
+        'success': True,
+        'validation': validation
+    }
+
+# ============================================================
+# 13. API: RUNTIME
+# ============================================================
+
+@app.post("/api/runtime/create")
+async def create_runtime(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    character_id = data.get('character_id')
+    table_link = data.get('table_link')
+    if not character_id or not table_link:
+        return {"success": False, "message": "Не указан character_id или table_link"}
+    try:
+        runtime = runtime_manager.create_runtime(character_id, user.id, table_link)
+        return {"success": True, "runtime_id": runtime.runtime_id, "runtime": runtime.to_dict()}
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@app.get("/api/runtime/{runtime_id}")
+async def get_runtime(runtime_id: str):
+    runtime = runtime_manager.get_runtime(runtime_id)
+    if not runtime:
+        return {"success": False, "message": "Runtime не найден"}
+    return {"success": True, "runtime": runtime.to_dict()}
+
+@app.post("/api/runtime/update")
+async def update_runtime(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    runtime_id = data.get('runtime_id')
+    if not runtime_id:
+        return {"success": False, "message": "Не указан runtime_id"}
+    update_data = {k: v for k, v in data.items() if k != 'runtime_id'}
+    runtime = runtime_manager.update_runtime(runtime_id, **update_data)
+    if not runtime:
+        return {"success": False, "message": "Runtime не найден"}
+    return {"success": True, "runtime": runtime.to_dict()}
+
+@app.post("/api/runtime/save")
+async def save_runtime(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    runtime_id = data.get('runtime_id')
+    if not runtime_id:
+        return {"success": False, "message": "Не указан runtime_id"}
+    success = runtime_manager.save_runtime_to_character(runtime_id)
+    if not success:
+        return {"success": False, "message": "Не удалось сохранить Runtime"}
+    return {"success": True, "message": "Runtime сохранён"}
+
+# ============================================================
+# 14. API: COMBAT
+# ============================================================
+
+@app.post("/api/combat/action")
+async def combat_action(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    source_runtime_id = data.get('source_runtime_id')
+    target_runtime_id = data.get('target_runtime_id')
+    ability_id = data.get('ability_id')
+    gm_confirmed = data.get('gm_confirmed', False)
+    
+    if not source_runtime_id or not target_runtime_id or not ability_id:
+        return {"success": False, "message": "Не указаны source_runtime_id, target_runtime_id или ability_id"}
+    
+    if not gm_confirmed:
+        return {
+            'success': False,
+            'error': 'Требуется подтверждение ГМ'
+        }
+    
+    source_runtime = runtime_manager.get_runtime(source_runtime_id)
+    target_runtime = runtime_manager.get_runtime(target_runtime_id)
+    
+    if not source_runtime:
+        return {"success": False, "message": "Источник не найден"}
+    if not target_runtime:
+        return {"success": False, "message": "Цель не найдена"}
+    
+    result = CombatEngine.resolve_action(
+        source_runtime,
+        target_runtime,
+        ability_id,
+        data.get('table_link', ''),
+        gm_confirmed=gm_confirmed
+    )
+    
+    if not result.get('success'):
+        return result
+    
+    table_link = data.get('table_link')
+    if table_link and table_link in connections:
+        for ws in connections[table_link]:
+            try:
+                await ws.send_text(json.dumps({'type': 'combat_result', 'result': result}))
+            except:
+                pass
+    
+    runtime_manager.save_runtime_to_character(source_runtime_id)
+    runtime_manager.save_runtime_to_character(target_runtime_id)
+    
+    return {'success': True, 'result': result}
+
+@app.get("/api/combat/abilities")
+async def get_abilities():
+    return {'success': True, 'abilities': list(CombatEngine.ABILITIES.values())}
+
+# ============================================================
+# 15. API: SESSION
+# ============================================================
 
 @app.post("/api/session/create")
 async def create_session(request: Request, data: dict):
@@ -1342,83 +1539,9 @@ async def get_session_info(session_id: str):
         return {"success": False, "message": "Сессия не найдена"}
     return {"success": True, "session": session.to_dict(), "players": [p.to_dict() for p in session.players.values()]}
 
-@app.post("/api/session/start")
-async def start_session(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    session_id = data.get('session_id')
-    if not session_id:
-        return {"success": False, "message": "Не указан session_id"}
-    session = session_manager.get_session(session_id)
-    if not session:
-        return {"success": False, "message": "Сессия не найдена"}
-    if session.gm_id != user.id:
-        return {"success": False, "message": "Только GM может начать сессию"}
-    if not session.start_session():
-        return {"success": False, "message": "Не удалось начать сессию"}
-    return {"success": True, "session": session.to_dict()}
-
-@app.post("/api/session/pause")
-async def pause_session(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    session_id = data.get('session_id')
-    if not session_id:
-        return {"success": False, "message": "Не указан session_id"}
-    session = session_manager.get_session(session_id)
-    if not session:
-        return {"success": False, "message": "Сессия не найдена"}
-    if session.gm_id != user.id:
-        return {"success": False, "message": "Только GM может ставить на паузу"}
-    if not session.pause_session():
-        return {"success": False, "message": "Не удалось поставить на паузу"}
-    return {"success": True, "session": session.to_dict()}
-
-@app.post("/api/session/resume")
-async def resume_session(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    session_id = data.get('session_id')
-    if not session_id:
-        return {"success": False, "message": "Не указан session_id"}
-    session = session_manager.get_session(session_id)
-    if not session:
-        return {"success": False, "message": "Сессия не найдена"}
-    if session.gm_id != user.id:
-        return {"success": False, "message": "Только GM может возобновить сессию"}
-    if not session.resume_session():
-        return {"success": False, "message": "Не удалось возобновить сессию"}
-    return {"success": True, "session": session.to_dict()}
-
-@app.post("/api/session/finish")
-async def finish_session(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    session_id = data.get('session_id')
-    if not session_id:
-        return {"success": False, "message": "Не указан session_id"}
-    session = session_manager.get_session(session_id)
-    if not session:
-        return {"success": False, "message": "Сессия не найдена"}
-    if session.gm_id != user.id:
-        return {"success": False, "message": "Только GM может завершить сессию"}
-    if not session.finish_session():
-        return {"success": False, "message": "Не удалось завершить сессию"}
-    return {"success": True, "session": session.to_dict()}
-
-@app.get("/api/session/{session_id}/logs")
-async def get_session_logs(session_id: str, limit: int = 50):
-    logs = session_manager.get_session_logs(session_id, limit)
-    return {"success": True, "logs": logs}
-
-@app.get("/api/sessions")
-async def get_all_sessions():
-    sessions = session_manager.get_all_sessions()
-    return {"success": True, "sessions": [s.to_dict() for s in sessions]}
+# ============================================================
+# 16. API: TABLES, TOKENS, MAP
+# ============================================================
 
 @app.post("/api/upload_avatar")
 async def upload_avatar(file: UploadFile = File(...)):
@@ -1737,6 +1860,10 @@ async def delete_table(data: dict):
     finally:
         session.close()
 
+# ============================================================
+# 17. ИНИЦИАЛИЗАЦИЯ
+# ============================================================
+
 def init_libraries():
     session = Session()
     if session.query(Settings).first():
@@ -1755,6 +1882,10 @@ def init_libraries():
     print("✅ Библиотеки инициализированы!")
 
 init_libraries()
+
+# ============================================================
+# 18. СТРАНИЦЫ
+# ============================================================
 
 @app.get("/")
 async def root(request: Request):
@@ -1939,6 +2070,10 @@ async def game_room(request: Request, table_link: str):
         session.close()
         return HTMLResponse(content=f"<h2>Ошибка: {e}</h2>", status_code=500)
 
+# ============================================================
+# 19. WEBSOCKET
+# ============================================================
+
 @app.websocket("/ws/{table_link}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: int):
     await websocket.accept()
@@ -1951,22 +2086,10 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
     if not session:
         gm = Session().query(GameTable).filter_by(link=table_link).first()
         if gm:
-            session = session_manager.create_session(
-                f"Session for {table_link}",
-                gm.gm_id,
-                table_link
-            )
+            session = session_manager.create_session(f"Session for {table_link}", gm.gm_id, table_link)
     if session:
-        session_manager.add_player_to_session(
-            session.session_id,
-            player_id,
-            player_name,
-            str(id(websocket))
-        )
-        await websocket.send_text(json.dumps({
-            "type": "session_joined",
-            "session": session.to_dict()
-        }))
+        session_manager.add_player_to_session(session.session_id, player_id, player_name, str(id(websocket)))
+        await websocket.send_text(json.dumps({"type": "session_joined", "session": session.to_dict()}))
     db_session = Session()
     token = db_session.query(GameToken).filter_by(table_link=table_link, owner_name=player_name, is_active=True).first()
     db_session.close()
@@ -1975,19 +2098,10 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
             runtime = runtime_manager.create_runtime(token.character_id, player_id, table_link)
             if session:
                 session.add_runtime(runtime)
-            await websocket.send_text(json.dumps({
-                "type": "runtime_created",
-                "runtime": runtime.to_dict()
-            }))
+            await websocket.send_text(json.dumps({"type": "runtime_created", "runtime": runtime.to_dict()}))
         except Exception as e:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": f"Ошибка создания Runtime: {e}"
-            }))
-    await websocket.send_text(json.dumps({
-        "type": "system",
-        "text": f"Добро пожаловать в игру {table_link}, {player_name}!"
-    }))
+            await websocket.send_text(json.dumps({"type": "error", "message": f"Ошибка создания Runtime: {e}"}))
+    await websocket.send_text(json.dumps({"type": "system", "text": f"Добро пожаловать в игру {table_link}, {player_name}!"}))
     try:
         while True:
             data = await websocket.receive_text()
@@ -2017,7 +2131,14 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                     source_runtime_id = msg.get('source_runtime_id')
                     target_runtime_id = msg.get('target_runtime_id')
                     ability_id = msg.get('ability_id')
+                    gm_confirmed = msg.get('gm_confirmed', False)
                     if source_runtime_id and target_runtime_id and ability_id:
+                        if not gm_confirmed:
+                            await websocket.send_text(json.dumps({
+                                'type': 'error',
+                                'message': 'Требуется подтверждение ГМ'
+                            }))
+                            continue
                         source_runtime = runtime_manager.get_runtime(source_runtime_id)
                         target_runtime = runtime_manager.get_runtime(target_runtime_id)
                         if source_runtime and target_runtime:
@@ -2025,14 +2146,12 @@ async def websocket_endpoint(websocket: WebSocket, table_link: str, player_id: i
                                 source_runtime,
                                 target_runtime,
                                 ability_id,
-                                table_link
+                                table_link,
+                                gm_confirmed=gm_confirmed
                             )
                             for ws in connections.get(table_link, []):
                                 try:
-                                    await ws.send_text(json.dumps({
-                                        'type': 'combat_result',
-                                        'result': result
-                                    }))
+                                    await ws.send_text(json.dumps({'type': 'combat_result', 'result': result}))
                                 except:
                                     pass
                             runtime_manager.save_runtime_to_character(source_runtime_id)
