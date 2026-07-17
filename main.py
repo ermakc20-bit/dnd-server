@@ -18,24 +18,22 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 # ============================================================
-# 1. ENUMS — СОСТОЯНИЯ КОМНАТЫ
+# 1. ENUMS
 # ============================================================
 
 class RoomState(str, Enum):
-    """Состояния игровой комнаты (Game Flow)."""
-    PREPARATION = "preparation"              # Подготовка (только GM)
-    CHARACTER_SELECTION = "character_selection"  # Выбор персонажей
-    WAITING_FOR_PLAYERS = "waiting_for_players"  # Ожидание игроков
-    EXPLORATION = "exploration"              # Исследование (основное состояние)
-    DIALOG = "dialog"                        # Диалог / катсцена
-    CHECK = "check"                          # Проверка (навык, характеристика)
-    COMBAT = "combat"                        # Бой
-    CUTSCENE = "cutscene"                    # Катсцена (всё заблокировано)
-    PAUSED = "paused"                        # Пауза
-    FINISHED = "finished"                    # Завершено
+    PREPARATION = "preparation"
+    CHARACTER_SELECTION = "character_selection"
+    WAITING_FOR_PLAYERS = "waiting_for_players"
+    EXPLORATION = "exploration"
+    DIALOG = "dialog"
+    CHECK = "check"
+    COMBAT = "combat"
+    CUTSCENE = "cutscene"
+    PAUSED = "paused"
+    FINISHED = "finished"
 
 class ActionCategory(str, Enum):
-    """Категории действий для проверки разрешений."""
     MOVE = "move"
     ATTACK = "attack"
     USE_SKILL = "use_skill"
@@ -49,6 +47,19 @@ class ActionCategory(str, Enum):
     DIALOGUE = "dialogue"
     COMBAT_ACTION = "combat_action"
     ADMIN = "admin"
+
+class UIPanelType(str, Enum):
+    CHARACTER = "character"
+    ACTION_BAR = "action_bar"
+    INVENTORY = "inventory"
+    DESCRIPTION = "description"
+    COMBAT_LOG = "combat_log"
+    CHAT = "chat"
+    INITIATIVE = "initiative"
+    DICE_OVERLAY = "dice_overlay"
+    NOTIFICATIONS = "notifications"
+    CONTEXT_MENU = "context_menu"
+    TOOLTIP = "tooltip"
 
 # ============================================================
 # 2. БАЗА ДАННЫХ
@@ -98,8 +109,6 @@ class Character(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
-    owner = relationship("User", foreign_keys=[created_by])
-    player = relationship("User", foreign_keys=[player_id])
 
 class CustomSkill(Base):
     __tablename__ = 'custom_skills'
@@ -133,7 +142,6 @@ class GameRoom(Base):
     is_private = Column(Boolean, default=False)
     current_map = Column(String(255), default='')
     current_scene = Column(String(100), default='')
-    # Данные для боя
     current_round = Column(Integer, default=0)
     current_turn = Column(Integer, default=0)
     current_player_id = Column(Integer, nullable=True)
@@ -157,8 +165,6 @@ class RoomPlayer(Base):
     role = Column(String(20), default='player')
     is_ready = Column(Boolean, default=False)
     joined_at = Column(DateTime, default=datetime.now)
-    user = relationship("User", foreign_keys=[user_id])
-    character = relationship("Character", foreign_keys=[character_id])
 
 class GameToken(Base):
     __tablename__ = 'game_tokens'
@@ -175,7 +181,6 @@ class GameToken(Base):
     layer = Column(String, default='common')
     description = Column(String, default='')
     created_at = Column(DateTime, default=datetime.now)
-    character = relationship("Character", foreign_keys=[character_id])
 
 class ActionLog(Base):
     __tablename__ = 'action_logs'
@@ -197,143 +202,863 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. GAME STATE MANAGER (СЕРДЦЕ GAME FLOW)
+# 3. UI FRAMEWORK (КЛИЕНТСКАЯ ЧАСТЬ В HTML/JS)
 # ============================================================
 
-class GameStateManager:
-    """
-    Управляет состоянием игровой комнаты.
-    Никакой модуль не может изменить состояние напрямую.
-    """
-    
-    # Разрешённые действия для каждого состояния
-    _state_permissions: Dict[RoomState, Set[ActionCategory]] = {
-        RoomState.PREPARATION: {
-            ActionCategory.ADMIN
-        },
-        RoomState.CHARACTER_SELECTION: {
-            ActionCategory.TALK,
-            ActionCategory.CHECK
-        },
-        RoomState.WAITING_FOR_PLAYERS: {
-            ActionCategory.TALK
-        },
-        RoomState.EXPLORATION: {
-            ActionCategory.MOVE,
-            ActionCategory.TALK,
-            ActionCategory.INTERACT,
-            ActionCategory.OPEN_DOOR,
-            ActionCategory.READ,
-            ActionCategory.CHECK,
-            ActionCategory.USE_ITEM,
-            ActionCategory.USE_SKILL,
-            ActionCategory.CAST_SPELL,
-            ActionCategory.DIALOGUE
-        },
-        RoomState.DIALOG: {
-            ActionCategory.TALK,
-            ActionCategory.DIALOGUE,
-            ActionCategory.CHECK
-        },
-        RoomState.CHECK: {
-            ActionCategory.CHECK
-        },
-        RoomState.COMBAT: {
-            ActionCategory.COMBAT_ACTION,
-            ActionCategory.USE_ITEM,
-            ActionCategory.TALK
-        },
-        RoomState.CUTSCENE: set(),  # Всё запрещено
-        RoomState.PAUSED: set(),    # Всё запрещено
-        RoomState.FINISHED: set()   # Всё запрещено
-    }
-    
-    # Допустимые переходы между состояниями
-    _allowed_transitions: Dict[RoomState, List[RoomState]] = {
-        RoomState.PREPARATION: [RoomState.CHARACTER_SELECTION, RoomState.FINISHED],
-        RoomState.CHARACTER_SELECTION: [RoomState.WAITING_FOR_PLAYERS, RoomState.EXPLORATION, RoomState.PREPARATION],
-        RoomState.WAITING_FOR_PLAYERS: [RoomState.CHARACTER_SELECTION, RoomState.EXPLORATION],
-        RoomState.EXPLORATION: [RoomState.DIALOG, RoomState.CHECK, RoomState.COMBAT, RoomState.PAUSED, RoomState.FINISHED, RoomState.CUTSCENE],
-        RoomState.DIALOG: [RoomState.EXPLORATION, RoomState.CHECK, RoomState.COMBAT, RoomState.FINISHED],
-        RoomState.CHECK: [RoomState.DIALOG, RoomState.EXPLORATION],
-        RoomState.COMBAT: [RoomState.EXPLORATION, RoomState.PAUSED, RoomState.FINISHED],
-        RoomState.CUTSCENE: [RoomState.EXPLORATION, RoomState.DIALOG, RoomState.FINISHED],
-        RoomState.PAUSED: [RoomState.EXPLORATION, RoomState.COMBAT, RoomState.DIALOG],
-        RoomState.FINISHED: []
-    }
-    
-    def __init__(self, room_id: int):
-        self.room_id = room_id
-        self._state: Optional[RoomState] = None
-        self._callbacks: List[callable] = []
-    
-    @property
-    def state(self) -> Optional[RoomState]:
-        return self._state
-    
-    def set_state(self, new_state: RoomState, session: Session, broadcast: bool = True) -> bool:
-        """
-        Устанавливает новое состояние комнаты.
-        Возвращает True, если переход разрешён и выполнен.
-        """
-        if self._state and new_state not in self._allowed_transitions.get(self._state, []):
-            return False
-        
-        # Обновляем в БД
-        room = session.query(GameRoom).filter_by(id=self.room_id).first()
-        if not room:
-            return False
-        
-        room.state = new_state.value
-        session.commit()
-        
-        self._state = new_state
-        
-        # Уведомляем всех в комнате
-        if broadcast:
-            import asyncio
-            asyncio.create_task(self._broadcast_state_change(new_state))
-        
-        # Вызываем колбэки
-        for callback in self._callbacks:
-            callback(new_state)
-        
-        return True
-    
-    def get_state(self) -> Optional[RoomState]:
-        return self._state
-    
-    def can_execute_action(self, action: ActionCategory, user_role: str = 'player') -> bool:
-        """
-        Проверяет, разрешено ли действие в текущем состоянии.
-        GM всегда может всё.
-        """
-        if user_role == 'gm':
-            return True
-        
-        if self._state is None:
-            return False
-        
-        allowed = self._state_permissions.get(self._state, set())
-        return action in allowed
-    
-    def lock_actions(self):
-        """Блокирует все действия (для CUTSCENE, PAUSED)."""
-        # Временно устанавливаем состояние, которое блокирует всё
-        pass
-    
-    def unlock_actions(self):
-        """Разблокирует действия."""
-        pass
-    
-    def register_callback(self, callback: callable):
-        """Регистрирует callback при смене состояния."""
-        self._callbacks.append(callback)
-    
-    async def _broadcast_state_change(self, new_state: RoomState):
-        """Отправляет изменение состояния всем клиентам."""
-        from app import manager  # Импорт из основного модуля
-        await manager.broadcast_state(self.room_id, new_state)
+# HTML-шаблон для игрового интерфейса
+UI_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D VTT — {{ room.name }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        /* ===== БАЗОВЫЕ ПЕРЕМЕННЫЕ ===== */
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #2a2a3e;
+            --bg-panel: #16162a;
+            --bg-hover: #3a3a4e;
+            --accent: #c7a252;
+            --accent-hover: #f0d5a0;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --border-color: #3a3a4e;
+            --shadow: rgba(0,0,0,0.8);
+            --radius: 8px;
+            --panel-transition: 0.3s ease;
+        }
+
+        /* ===== ГЛОБАЛЬНЫЕ СТИЛИ ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* ===== GAME CONTAINER ===== */
+        .game-container {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+            gap: 0;
+            background: var(--bg-primary);
+        }
+
+        /* ===== ЛЕВАЯ ПАНЕЛЬ ===== */
+        .left-panel {
+            grid-row: 1 / 2;
+            grid-column: 1 / 2;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            gap: 8px;
+            overflow-y: auto;
+        }
+
+        /* ===== ПАНЕЛЬ ПЕРСОНАЖА ===== */
+        .character-panel {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .character-panel .portrait {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: var(--bg-hover);
+            border: 2px solid var(--accent);
+            background-size: cover;
+            background-position: center;
+            flex-shrink: 0;
+        }
+        .character-panel .info { flex: 1; }
+        .character-panel .name { font-weight: bold; color: var(--accent); font-size: 16px; }
+        .character-panel .class { font-size: 12px; color: var(--text-secondary); }
+        .character-panel .hp-bar {
+            height: 6px;
+            background: var(--bg-hover);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        .character-panel .hp-bar .fill {
+            height: 100%;
+            background: #4caf50;
+            transition: width 0.3s ease;
+        }
+        .character-panel .hp-text { font-size: 12px; color: var(--text-secondary); }
+        .character-panel .effects {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+        .character-panel .effect-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background: var(--bg-hover);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+        .character-panel .effect-icon .duration {
+            position: absolute;
+            bottom: -6px;
+            right: -6px;
+            font-size: 8px;
+            background: var(--bg-primary);
+            padding: 0 3px;
+            border-radius: 2px;
+        }
+
+        /* ===== ПАНЕЛЬ ДЕЙСТВИЙ ===== */
+        .action-bar {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .action-bar .actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 4px;
+        }
+        .action-bar .action-btn {
+            padding: 6px 4px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-hover);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .action-bar .action-btn:hover {
+            background: var(--accent);
+            color: var(--bg-primary);
+            border-color: var(--accent);
+        }
+        .action-bar .action-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .action-bar .action-btn .icon { font-size: 16px; display: block; }
+        .action-bar .action-btn .label { font-size: 9px; }
+
+        /* ===== ПРАВАЯ ПАНЕЛЬ ===== */
+        .right-panel {
+            grid-row: 1 / 2;
+            grid-column: 3 / 4;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            gap: 6px;
+            overflow-y: auto;
+        }
+
+        /* ===== ЦЕНТРАЛЬНАЯ ОБЛАСТЬ ===== */
+        .center-area {
+            grid-row: 1 / 2;
+            grid-column: 2 / 3;
+            position: relative;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+        .center-area .map-container {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-primary);
+            position: relative;
+        }
+        .center-area .map-container canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* ===== ИНИЦИАТИВА (оверлей) ===== */
+        .initiative-overlay {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            min-width: 200px;
+            display: none;
+            z-index: 10;
+        }
+        .initiative-overlay.visible { display: block; }
+        .initiative-overlay .title { font-weight: bold; color: var(--accent); font-size: 14px; margin-bottom: 6px; }
+        .initiative-overlay .item {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .initiative-overlay .item.active {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+        .initiative-overlay .item .turn { font-weight: bold; }
+
+        /* ===== ЧАТ ===== */
+        .chat-window {
+            flex: 1;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            min-height: 150px;
+        }
+        .chat-window .header {
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: bold;
+            color: var(--accent);
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .chat-window .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 8px;
+            font-size: 12px;
+            max-height: 300px;
+        }
+        .chat-window .messages .msg {
+            padding: 2px 6px;
+            margin-bottom: 2px;
+            border-radius: 3px;
+        }
+        .chat-window .messages .msg.system { color: var(--text-secondary); font-style: italic; }
+        .chat-window .messages .msg.player { color: var(--accent); }
+        .chat-window .messages .msg.combat { color: #ff6b6b; }
+        .chat-window .messages .msg.gm { color: #ffd93d; }
+        .chat-window .input-area {
+            display: flex;
+            padding: 4px;
+            border-top: 1px solid var(--border-color);
+            gap: 4px;
+        }
+        .chat-window .input-area input {
+            flex: 1;
+            padding: 4px 8px;
+            border: none;
+            border-radius: 3px;
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+        .chat-window .input-area input:focus { outline: 2px solid var(--accent); }
+        .chat-window .input-area button {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 3px;
+            background: var(--accent);
+            color: var(--bg-primary);
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .chat-window .input-area button:hover { background: var(--accent-hover); }
+
+        /* ===== DICE OVERLAY ===== */
+        .dice-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+        }
+        .dice-overlay.visible { display: block; }
+        .dice-overlay .dice-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .dice-overlay .die {
+            width: 60px;
+            height: 60px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-primary);
+            animation: dice-roll 0.8s ease-out;
+            box-shadow: 0 0 30px rgba(199, 162, 82, 0.3);
+        }
+        .dice-overlay .die.critical { border-color: #ffd93d; color: #ffd93d; box-shadow: 0 0 40px rgba(255, 217, 61, 0.5); }
+        .dice-overlay .die.fumble { border-color: #ff6b6b; color: #ff6b6b; box-shadow: 0 0 40px rgba(255, 107, 107, 0.5); }
+        @keyframes dice-roll {
+            0% { transform: rotate(0deg) scale(0); opacity: 0; }
+            50% { transform: rotate(720deg) scale(1.5); opacity: 1; }
+            100% { transform: rotate(0deg) scale(1); opacity: 1; }
+        }
+
+        /* ===== УВЕДОМЛЕНИЯ ===== */
+        .notifications {
+            position: fixed;
+            top: 60px;
+            right: 12px;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 320px;
+        }
+        .notification {
+            padding: 10px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            box-shadow: 0 4px 20px var(--shadow);
+            animation: slide-in 0.3s ease-out;
+            font-size: 13px;
+        }
+        .notification .title { font-weight: bold; color: var(--accent); }
+        .notification .desc { color: var(--text-secondary); font-size: 12px; }
+        @keyframes slide-in {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ===== КОНТЕКСТНОЕ МЕНЮ ===== */
+        .context-menu {
+            display: none;
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 4px 0;
+            min-width: 180px;
+            z-index: 9999;
+            box-shadow: 0 8px 30px var(--shadow);
+        }
+        .context-menu.visible { display: block; }
+        .context-menu .item {
+            padding: 6px 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+        .context-menu .item:hover { background: var(--bg-hover); }
+        .context-menu .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 8px;
+        }
+
+        /* ===== СОСТОЯНИЯ ИНТЕРФЕЙСА ===== */
+        .state-indicator {
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 16px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 50;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            pointer-events: none;
+        }
+
+        /* ===== АДАПТИВНОСТЬ ===== */
+        @media (max-width: 1024px) {
+            .game-container {
+                grid-template-columns: 220px 1fr 260px;
+            }
+        }
+        @media (max-width: 768px) {
+            .game-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr auto;
+            }
+            .left-panel, .right-panel {
+                display: none;
+            }
+            .left-panel.mobile-visible, .right-panel.mobile-visible {
+                display: flex;
+            }
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg-panel); }
+        ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-hover); }
+    </style>
+</head>
+<body>
+    <!-- ИНДИКАТОР СОСТОЯНИЯ -->
+    <div class="state-indicator" id="stateIndicator">⏳ {{ room.state }}</div>
+
+    <!-- УВЕДОМЛЕНИЯ -->
+    <div class="notifications" id="notifications"></div>
+
+    <!-- DICE OVERLAY -->
+    <div class="dice-overlay" id="diceOverlay">
+        <div class="dice-container" id="diceContainer"></div>
+    </div>
+
+    <!-- КОНТЕКСТНОЕ МЕНЮ -->
+    <div class="context-menu" id="contextMenu"></div>
+
+    <!-- ОСНОВНОЙ КОНТЕЙНЕР -->
+    <div class="game-container">
+        <!-- ЛЕВАЯ ПАНЕЛЬ -->
+        <div class="left-panel" id="leftPanel">
+            <!-- ПАНЕЛЬ ПЕРСОНАЖА -->
+            <div class="character-panel" id="characterPanel">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div class="portrait" id="characterPortrait" style="background-image: url('{{ character.portrait or '/static/images/default_avatar.png' }}');"></div>
+                    <div class="info">
+                        <div class="name" id="characterName">{{ character.name or 'Без имени' }}</div>
+                        <div class="class" id="characterClass">{{ character.class_name or 'Нет класса' }}</div>
+                        <div class="hp-text" id="characterHp">❤️ {{ character.current_hp or 0 }}/{{ character.max_hp or 20 }}</div>
+                        <div class="hp-bar"><div class="fill" id="characterHpBar" style="width: {{ (character.current_hp or 0) / (character.max_hp or 1) * 100 }}%;"></div></div>
+                        <div class="effects" id="characterEffects"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ПАНЕЛЬ ДЕЙСТВИЙ -->
+            <div class="action-bar" id="actionBar">
+                <div class="actions" id="actionButtons">
+                    <button class="action-btn" data-action="attack" onclick="executeAction('attack')">
+                        <span class="icon">⚔️</span>
+                        <span class="label">Атака</span>
+                    </button>
+                    <button class="action-btn" data-action="spell" onclick="executeAction('spell')">
+                        <span class="icon">🔮</span>
+                        <span class="label">Заклинание</span>
+                    </button>
+                    <button class="action-btn" data-action="heal" onclick="executeAction('heal')">
+                        <span class="icon">💚</span>
+                        <span class="label">Лечение</span>
+                    </button>
+                    <button class="action-btn" data-action="skill" onclick="executeAction('skill')">
+                        <span class="icon">🎯</span>
+                        <span class="label">Навык</span>
+                    </button>
+                    <button class="action-btn" data-action="item" onclick="executeAction('item')">
+                        <span class="icon">📦</span>
+                        <span class="label">Предмет</span>
+                    </button>
+                    <button class="action-btn" data-action="talk" onclick="executeAction('talk')">
+                        <span class="icon">💬</span>
+                        <span class="label">Диалог</span>
+                    </button>
+                    <button class="action-btn" data-action="check" onclick="executeAction('check')">
+                        <span class="icon">🔍</span>
+                        <span class="label">Проверка</span>
+                    </button>
+                    <button class="action-btn" data-action="inventory" onclick="toggleInventory()">
+                        <span class="icon">🎒</span>
+                        <span class="label">Инвентарь</span>
+                    </button>
+                    <button class="action-btn" data-action="description" onclick="toggleDescription()">
+                        <span class="icon">📄</span>
+                        <span class="label">Описание</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ -->
+        <div class="center-area">
+            <div class="map-container" id="mapContainer">
+                <canvas id="mapCanvas"></canvas>
+                <!-- Токены будут добавляться динамически -->
+                <div id="tokensLayer"></div>
+            </div>
+
+            <!-- ИНИЦИАТИВА (оверлей) -->
+            <div class="initiative-overlay" id="initiativePanel">
+                <div class="title">⚔️ Инициатива</div>
+                <div id="initiativeList"></div>
+            </div>
+        </div>
+
+        <!-- ПРАВАЯ ПАНЕЛЬ -->
+        <div class="right-panel" id="rightPanel">
+            <!-- ЧАТ -->
+            <div class="chat-window" id="chatWindow">
+                <div class="header">
+                    <span>💬 Чат</span>
+                    <span style="font-size:11px;color:var(--text-secondary);" id="chatCount">0</span>
+                </div>
+                <div class="messages" id="chatMessages"></div>
+                <div class="input-area">
+                    <input type="text" id="chatInput" placeholder="Сообщение..." onkeydown="if(event.key==='Enter') sendChat()">
+                    <button onclick="sendChat()">➤</button>
+                </div>
+            </div>
+
+            <!-- БОЕВОЙ ЖУРНАЛ -->
+            <div class="chat-window" id="combatLog" style="flex:0.7;min-height:100px;">
+                <div class="header"><span>📜 Боевой журнал</span></div>
+                <div class="messages" id="combatLogMessages" style="max-height:120px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 1. UI MANAGER
+        // ============================================================
+
+        class UIManager {
+            constructor() {
+                this.panels = {};
+                this.state = '{{ room.state }}';
+                this.character = {{ character.to_dict()|tojson if character else '{}' }};
+                this.isGm = {{ 'true' if is_gm else 'false' }};
+                this.roomId = '{{ room.room_id }}';
+                this.ws = null;
+                this.initWebSocket();
+                this.initEventListeners();
+                this.updateUI();
+            }
+
+            // ===== WEBSOCKET =====
+            initWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.ws = new WebSocket(`${protocol}//${window.location.host}/ws/room/${this.roomId}`);
+                
+                this.ws.onopen = () => {
+                    this.addChatMessage('Система', 'Подключено к серверу', 'system');
+                };
+                
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleWebSocketMessage(data);
+                    } catch (e) {
+                        console.error('WebSocket error:', e);
+                    }
+                };
+                
+                this.ws.onclose = () => {
+                    this.addChatMessage('Система', 'Отключено от сервера', 'system');
+                };
+            }
+
+            handleWebSocketMessage(data) {
+                switch(data.type) {
+                    case 'room_state_changed':
+                        this.state = data.state;
+                        this.updateUI();
+                        this.showNotification('Состояние игры', `Переход в ${data.state_name}`, 'info');
+                        break;
+                    case 'chat':
+                        this.addChatMessage(data.username, data.text, 'player');
+                        break;
+                    case 'move':
+                        this.updateTokenPosition(data.token_id, data.x, data.y);
+                        break;
+                    case 'action_result':
+                        this.addCombatLog(data.message || 'Действие выполнено', data.result || {});
+                        break;
+                    case 'character_update':
+                        if (data.character_id === this.character.id) {
+                            this.character = data.character;
+                            this.updateCharacterPanel();
+                        }
+                        break;
+                    case 'roll_result':
+                        this.showDiceAnimation(data.results || [], data.total || 0);
+                        break;
+                    case 'notification':
+                        this.showNotification(data.title, data.message, data.type || 'info');
+                        break;
+                    case 'error':
+                        this.showNotification('Ошибка', data.message, 'error');
+                        break;
+                }
+            }
+
+            // ===== UI ОБНОВЛЕНИЯ =====
+            updateUI() {
+                // Обновляем индикатор состояния
+                document.getElementById('stateIndicator').textContent = `🎮 ${this.state}`;
+                
+                // Обновляем видимость панелей
+                this.updatePanelsVisibility();
+                
+                // Обновляем доступность действий
+                this.updateActionsAvailability();
+                
+                // Обновляем инициативу
+                if (this.state === 'combat') {
+                    document.getElementById('initiativePanel').classList.add('visible');
+                } else {
+                    document.getElementById('initiativePanel').classList.remove('visible');
+                }
+            }
+
+            updatePanelsVisibility() {
+                const combatOnly = ['initiativePanel'];
+                const explorationOnly = ['actionBar'];
+                
+                switch(this.state) {
+                    case 'combat':
+                        document.getElementById('initiativePanel').classList.add('visible');
+                        break;
+                    default:
+                        document.getElementById('initiativePanel').classList.remove('visible');
+                        break;
+                }
+            }
+
+            updateActionsAvailability() {
+                const buttons = document.querySelectorAll('.action-btn');
+                const disabledStates = ['cutscene', 'paused', 'finished'];
+                const isDisabled = disabledStates.includes(this.state);
+                
+                buttons.forEach(btn => {
+                    btn.disabled = isDisabled || (this.state === 'character_selection' && btn.dataset.action !== 'talk');
+                });
+            }
+
+            // ===== ПАНЕЛЬ ПЕРСОНАЖА =====
+            updateCharacterPanel() {
+                const c = this.character;
+                document.getElementById('characterName').textContent = c.name || 'Без имени';
+                document.getElementById('characterClass').textContent = c.class_name || 'Нет класса';
+                document.getElementById('characterHp').textContent = `❤️ ${c.current_hp || 0}/${c.max_hp || 20}`;
+                
+                const hpPercent = ((c.current_hp || 0) / (c.max_hp || 1)) * 100;
+                document.getElementById('characterHpBar').style.width = `${Math.min(100, hpPercent)}%`;
+                
+                if (c.portrait) {
+                    document.getElementById('characterPortrait').style.backgroundImage = `url('${c.portrait}')`;
+                }
+                
+                // Эффекты
+                const effectsContainer = document.getElementById('characterEffects');
+                effectsContainer.innerHTML = '';
+                if (c.effects && c.effects.length > 0) {
+                    c.effects.forEach(effect => {
+                        const el = document.createElement('div');
+                        el.className = 'effect-icon';
+                        el.innerHTML = `${effect.icon || '✨'}<span class="duration">${effect.remaining_turns || 0}</span>`;
+                        el.title = effect.name || 'Эффект';
+                        effectsContainer.appendChild(el);
+                    });
+                }
+            }
+
+            // ===== ЧАТ =====
+            addChatMessage(username, text, type = 'player') {
+                const container = document.getElementById('chatMessages');
+                const msg = document.createElement('div');
+                msg.className = `msg ${type}`;
+                msg.textContent = type === 'system' ? `⚙ ${text}` : `${username}: ${text}`;
+                container.appendChild(msg);
+                container.scrollTop = container.scrollHeight;
+                document.getElementById('chatCount').textContent = container.children.length;
+            }
+
+            sendChat() {
+                const input = document.getElementById('chatInput');
+                const text = input.value.trim();
+                if (!text || !this.ws) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'chat',
+                    text: text,
+                    username: '{{ user.login }}',
+                    user_id: {{ user.id }}
+                }));
+                input.value = '';
+            }
+
+            // ===== БОЕВОЙ ЖУРНАЛ =====
+            addCombatLog(message, data) {
+                const container = document.getElementById('combatLogMessages');
+                const msg = document.createElement('div');
+                msg.className = 'msg combat';
+                msg.textContent = `⚔️ ${message}`;
+                container.appendChild(msg);
+                container.scrollTop = container.scrollHeight;
+            }
+
+            // ===== УВЕДОМЛЕНИЯ =====
+            showNotification(title, message, type = 'info') {
+                const container = document.getElementById('notifications');
+                const notif = document.createElement('div');
+                notif.className = 'notification';
+                notif.innerHTML = `<div class="title">${title}</div><div class="desc">${message}</div>`;
+                if (type === 'error') {
+                    notif.style.borderColor = '#ff6b6b';
+                }
+                container.appendChild(notif);
+                
+                setTimeout(() => {
+                    notif.style.opacity = '0';
+                    notif.style.transition = 'opacity 0.3s';
+                    setTimeout(() => notif.remove(), 300);
+                }, 4000);
+            }
+
+            // ===== АНИМАЦИЯ КУБИКОВ =====
+            showDiceAnimation(results, total) {
+                const overlay = document.getElementById('diceOverlay');
+                const container = document.getElementById('diceContainer');
+                container.innerHTML = '';
+                
+                results.forEach((result, index) => {
+                    const die = document.createElement('div');
+                    die.className = 'die';
+                    die.textContent = result;
+                    if (result === 20) die.classList.add('critical');
+                    if (result === 1) die.classList.add('fumble');
+                    die.style.animationDelay = `${index * 0.1}s`;
+                    container.appendChild(die);
+                });
+                
+                overlay.classList.add('visible');
+                
+                setTimeout(() => {
+                    overlay.classList.remove('visible');
+                    container.innerHTML = '';
+                }, 3000);
+            }
+
+            // ===== ТОКЕНЫ =====
+            updateTokenPosition(tokenId, x, y) {
+                const token = document.querySelector(`[data-token-id="${tokenId}"]`);
+                if (token) {
+                    token.style.transform = `translate(${x}px, ${y}px)`;
+                }
+            }
+
+            // ===== ДЕЙСТВИЯ =====
+            executeAction(action) {
+                if (!this.ws) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'action',
+                    action_type: action,
+                    user_id: {{ user.id }},
+                    character_id: {{ character.id if character else 0 }}
+                }));
+            }
+
+            // ===== ИНИЦИАЛИЗАЦИЯ =====
+            initEventListeners() {
+                // Клик по карте для контекстного меню
+                document.getElementById('mapContainer').addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.showContextMenu(e.clientX, e.clientY);
+                });
+                
+                // Закрытие контекстного меню
+                document.addEventListener('click', () => {
+                    document.getElementById('contextMenu').classList.remove('visible');
+                });
+            }
+
+            showContextMenu(x, y) {
+                const menu = document.getElementById('contextMenu');
+                menu.style.left = `${x}px`;
+                menu.style.top = `${y}px`;
+                menu.innerHTML = `
+                    <div class="item" onclick="uiManager.executeAction('attack')">⚔️ Атаковать</div>
+                    <div class="item" onclick="uiManager.executeAction('check')">🔍 Проверить</div>
+                    <div class="item" onclick="uiManager.executeAction('talk')">💬 Поговорить</div>
+                    <div class="divider"></div>
+                    <div class="item" onclick="uiManager.executeAction('interact')">🖐️ Взаимодействовать</div>
+                `;
+                menu.classList.add('visible');
+            }
+
+            // ===== ИНВЕНТАРЬ И ОПИСАНИЕ =====
+            toggleInventory() {
+                // Открыть инвентарь (в будущем)
+                this.showNotification('Инвентарь', 'Открыт инвентарь', 'info');
+            }
+
+            toggleDescription() {
+                // Открыть описание (в будущем)
+                this.showNotification('Описание', 'Открыто описание персонажа', 'info');
+            }
+        }
+
+        // ============================================================
+        // 2. ГЛОБАЛЬНЫЕ ФУНКЦИИ ДЛЯ HTML
+        // ============================================================
+
+        let uiManager;
+
+        function executeAction(action) {
+            if (uiManager) uiManager.executeAction(action);
+        }
+
+        function sendChat() {
+            if (uiManager) uiManager.sendChat();
+        }
+
+        function toggleInventory() {
+            if (uiManager) uiManager.toggleInventory();
+        }
+
+        function toggleDescription() {
+            if (uiManager) uiManager.toggleDescription();
+        }
+
+        // ============================================================
+        // 3. ЗАПУСК
+        // ============================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            uiManager = new UIManager();
+            uiManager.updateCharacterPanel();
+        });
+    </script>
+</body>
+</html>
+"""
 
 # ============================================================
 # 4. МИГРАЦИЯ
@@ -426,653 +1151,54 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 7. ROOM MANAGER
-# ============================================================
-
-class RoomManager:
-    def __init__(self):
-        self._rooms: Dict[str, GameRoom] = {}
-        self._state_managers: Dict[int, GameStateManager] = {}
-
-    def create_room(self, name: str, description: str, gm_id: int, max_players: int = 6, is_private: bool = False, password: str = None) -> GameRoom:
-        room_id = generate_room_id()
-        session = Session()
-        try:
-            room = GameRoom(
-                room_id=room_id,
-                name=name,
-                description=description,
-                gm_id=gm_id,
-                max_players=max_players,
-                is_private=is_private,
-                password_hash=hash_password(password) if password else None,
-                state=RoomState.PREPARATION
-            )
-            session.add(room)
-            session.commit()
-            
-            room_player = RoomPlayer(
-                room_id=room.id,
-                user_id=gm_id,
-                role='gm',
-                is_ready=True
-            )
-            session.add(room_player)
-            session.commit()
-            session.refresh(room)
-            
-            # Создаём GameStateManager для комнаты
-            self._state_managers[room.id] = GameStateManager(room.id)
-            self._state_managers[room.id]._state = RoomState.PREPARATION
-            
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-        return room
-
-    def get_room(self, room_id: str) -> Optional[GameRoom]:
-        session = Session()
-        room = session.query(GameRoom).filter_by(room_id=room_id).first()
-        session.close()
-        return room
-
-    def get_room_by_id(self, room_id: int) -> Optional[GameRoom]:
-        session = Session()
-        room = session.query(GameRoom).filter_by(id=room_id).first()
-        session.close()
-        return room
-
-    def get_state_manager(self, room_id: int) -> Optional[GameStateManager]:
-        return self._state_managers.get(room_id)
-
-    def get_rooms_by_gm(self, gm_id: int) -> List[GameRoom]:
-        session = Session()
-        rooms = session.query(GameRoom).filter_by(gm_id=gm_id).filter(GameRoom.state != RoomState.FINISHED).all()
-        session.close()
-        return rooms
-
-    def get_all_rooms(self) -> List[GameRoom]:
-        session = Session()
-        rooms = session.query(GameRoom).filter(GameRoom.state != RoomState.FINISHED).all()
-        session.close()
-        return rooms
-
-    def get_room_players(self, room_id: str) -> List[dict]:
-        session = Session()
-        players = session.query(RoomPlayer).filter_by(room_id=room_id).all()
-        result = []
-        for p in players:
-            user = session.query(User).filter_by(id=p.user_id).first()
-            character = session.query(Character).filter_by(id=p.character_id).first() if p.character_id else None
-            result.append({
-                'user_id': p.user_id,
-                'login': user.login if user else 'Unknown',
-                'role': p.role,
-                'is_ready': p.is_ready,
-                'character_id': p.character_id,
-                'character_name': character.name if character else None
-            })
-        session.close()
-        return result
-
-room_manager = RoomManager()
-
-# ============================================================
-# 8. CONNECTION MANAGER (С ПОДДЕРЖКОЙ STATE)
-# ============================================================
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, List[WebSocket]] = {}
-        self.user_connections: Dict[int, int] = {}
-        self.connection_users: Dict[WebSocket, int] = {}
-        self.connection_rooms: Dict[WebSocket, int] = {}
-
-    async def connect(self, websocket: WebSocket, room_id: int, user_id: int):
-        await websocket.accept()
-        if room_id not in self.active_connections:
-            self.active_connections[room_id] = []
-        self.active_connections[room_id].append(websocket)
-        self.connection_users[websocket] = user_id
-        self.connection_rooms[websocket] = room_id
-        self.user_connections[user_id] = room_id
-
-    def disconnect(self, websocket: WebSocket):
-        room_id = self.connection_rooms.get(websocket)
-        user_id = self.connection_users.get(websocket)
-        if room_id and room_id in self.active_connections:
-            if websocket in self.active_connections[room_id]:
-                self.active_connections[room_id].remove(websocket)
-            if not self.active_connections[room_id]:
-                del self.active_connections[room_id]
-        if user_id and user_id in self.user_connections:
-            del self.user_connections[user_id]
-        if websocket in self.connection_users:
-            del self.connection_users[websocket]
-        if websocket in self.connection_rooms:
-            del self.connection_rooms[websocket]
-
-    async def broadcast(self, room_id: int, message: dict, exclude: List[WebSocket] = None):
-        if room_id not in self.active_connections:
-            return
-        exclude = exclude or []
-        for connection in self.active_connections[room_id]:
-            if connection not in exclude:
-                try:
-                    await connection.send_text(json.dumps(message))
-                except:
-                    pass
-
-    async def broadcast_state(self, room_id: int, new_state: RoomState):
-        """Отправляет изменение состояния всем в комнате."""
-        await self.broadcast(room_id, {
-            'type': 'room_state_changed',
-            'state': new_state.value,
-            'state_name': new_state.name,
-            'timestamp': datetime.now().isoformat()
-        })
-
-    def get_user_id(self, websocket: WebSocket) -> Optional[int]:
-        return self.connection_users.get(websocket)
-
-    def get_room_id(self, websocket: WebSocket) -> Optional[int]:
-        return self.connection_rooms.get(websocket)
-
-manager = ConnectionManager()
-
-# ============================================================
-# 9. API: GAME FLOW (УПРАВЛЕНИЕ СОСТОЯНИЕМ)
-# ============================================================
-
-@app.post("/api/room/state/change")
-async def change_room_state(request: Request, data: dict):
-    """Изменяет состояние комнаты (только через GameStateManager)."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id = data.get('room_id')
-    new_state_str = data.get('state')
-    
-    if not room_id or not new_state_str:
-        return {"success": False, "message": "Не указаны room_id или state"}
-    
-    # Получаем комнату
-    room = room_manager.get_room(room_id)
-    if not room:
-        return {"success": False, "message": "Комната не найдена"}
-    
-    # Только GM может менять состояние
-    if room.gm_id != user.id:
-        return {"success": False, "message": "Только GM может менять состояние комнаты"}
-    
-    try:
-        new_state = RoomState(new_state_str)
-    except ValueError:
-        return {"success": False, "message": f"Неизвестное состояние: {new_state_str}"}
-    
-    # Получаем State Manager
-    state_manager = room_manager.get_state_manager(room.id)
-    if not state_manager:
-        return {"success": False, "message": "State Manager не найден"}
-    
-    session = Session()
-    try:
-        success = state_manager.set_state(new_state, session, broadcast=True)
-        if not success:
-            return {"success": False, "message": f"Переход из {state_manager.state} в {new_state} запрещён"}
-        return {"success": True, "state": new_state.value}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.get("/api/room/{room_id}/state")
-async def get_room_state(room_id: str):
-    """Получает текущее состояние комнаты."""
-    room = room_manager.get_room(room_id)
-    if not room:
-        return {"success": False, "message": "Комната не найдена"}
-    
-    state_manager = room_manager.get_state_manager(room.id)
-    if not state_manager:
-        return {"success": False, "message": "State Manager не найден"}
-    
-    return {
-        'success': True,
-        'state': state_manager.state.value if state_manager.state else None,
-        'state_name': state_manager.state.name if state_manager.state else None,
-        'allowed_actions': [a.value for a in GameStateManager._state_permissions.get(state_manager.state, set())]
-    }
-
-@app.post("/api/action/check")
-async def check_action_permission(request: Request, data: dict):
-    """Проверяет, разрешено ли действие в текущем состоянии."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id = data.get('room_id')
-    action_str = data.get('action')
-    
-    if not room_id or not action_str:
-        return {"success": False, "message": "Не указаны room_id или action"}
-    
-    room = room_manager.get_room(room_id)
-    if not room:
-        return {"success": False, "message": "Комната не найдена"}
-    
-    state_manager = room_manager.get_state_manager(room.id)
-    if not state_manager:
-        return {"success": False, "message": "State Manager не найден"}
-    
-    try:
-        action = ActionCategory(action_str)
-    except ValueError:
-        return {"success": False, "message": f"Неизвестное действие: {action_str}"}
-    
-    # Определяем роль пользователя
-    user_role = 'gm' if room.gm_id == user.id else 'player'
-    
-    allowed = state_manager.can_execute_action(action, user_role)
-    return {
-        'success': True,
-        'allowed': allowed,
-        'state': state_manager.state.value if state_manager.state else None,
-        'action': action_str,
-        'role': user_role
-    }
-
-# ============================================================
-# 10. API: КОМНАТЫ (С СОСТОЯНИЕМ)
+# 7. API
 # ============================================================
 
 @app.post("/api/room/create")
 async def create_room(request: Request, data: dict):
     user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    if user.role != 'gm':
+    if not user or user.role != 'gm':
         return {"success": False, "message": "Только GM может создавать комнаты"}
     
     name = data.get('name', '').strip()
     if not name:
         return {"success": False, "message": "Введите название комнаты"}
     
+    session = Session()
     try:
-        room = room_manager.create_room(
+        room_id = generate_room_id()
+        room = GameRoom(
+            room_id=room_id,
             name=name,
             description=data.get('description', ''),
             gm_id=user.id,
             max_players=data.get('max_players', 6),
             is_private=data.get('is_private', False),
-            password=data.get('password')
+            state=RoomState.PREPARATION
         )
-        return {
-            'success': True,
-            'room': room.to_dict(),
-            'state': RoomState.PREPARATION.value,
-            'invite_link': f"/join/{room.room_id}"
-        }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-@app.get("/api/rooms")
-async def get_all_rooms():
-    rooms = room_manager.get_all_rooms()
-    return {
-        'success': True,
-        'rooms': [r.to_dict() for r in rooms]
-    }
-
-@app.get("/api/rooms/gm/{gm_id}")
-async def get_gm_rooms(gm_id: int):
-    rooms = room_manager.get_rooms_by_gm(gm_id)
-    return {
-        'success': True,
-        'rooms': [r.to_dict() for r in rooms]
-    }
-
-@app.get("/api/room/{room_id}")
-async def get_room(room_id: str):
-    room = room_manager.get_room(room_id)
-    if not room:
-        return {"success": False, "message": "Комната не найдена"}
-    players = room_manager.get_room_players(room_id)
-    
-    state_manager = room_manager.get_state_manager(room.id)
-    state = state_manager.state if state_manager else None
-    
-    return {
-        'success': True,
-        'room': room.to_dict(),
-        'players': players,
-        'state': state.value if state else None
-    }
-
-@app.post("/api/room/join")
-async def join_room(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id = data.get('room_id')
-    password = data.get('password')
-    
-    if not room_id:
-        return {"success": False, "message": "Не указан room_id"}
-    
-    session = Session()
-    try:
-        room = session.query(GameRoom).filter_by(room_id=room_id).first()
-        if not room:
-            return {"success": False, "message": "Комната не найдена"}
-        
-        if room.state == RoomState.FINISHED:
-            return {"success": False, "message": "Комната завершена"}
-        
-        if room.is_private and room.password_hash:
-            if not password or hash_password(password) != room.password_hash:
-                return {"success": False, "message": "Неверный пароль"}
-        
-        existing = session.query(RoomPlayer).filter_by(room_id=room.id, user_id=user.id).first()
-        if existing:
-            return {'success': True, 'message': 'Вы уже в комнате', 'room': room.to_dict()}
-        
-        players_count = session.query(RoomPlayer).filter_by(room_id=room.id).count()
-        if players_count >= room.max_players:
-            return {"success": False, "message": "Комната заполнена"}
+        session.add(room)
+        session.commit()
         
         room_player = RoomPlayer(
             room_id=room.id,
             user_id=user.id,
-            role='player',
-            is_ready=False
+            role='gm',
+            is_ready=True
         )
         session.add(room_player)
         session.commit()
         session.refresh(room)
         
-        return {'success': True, 'room': room.to_dict()}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/room/start")
-async def start_room(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    room_id = data.get('room_id')
-    if not room_id:
-        return {"success": False, "message": "Не указан room_id"}
-    
-    room = room_manager.get_room(room_id)
-    if not room:
-        return {"success": False, "message": "Комната не найдена"}
-    
-    if room.gm_id != user.id:
-        return {"success": False, "message": "Только GM может начать игру"}
-    
-    state_manager = room_manager.get_state_manager(room.id)
-    if not state_manager:
-        return {"success": False, "message": "State Manager не найден"}
-    
-    session = Session()
-    try:
-        # Переход в EXPLORATION через GameStateManager
-        success = state_manager.set_state(RoomState.EXPLORATION, session, broadcast=True)
-        if not success:
-            return {"success": False, "message": "Не удалось начать игру"}
-        
-        return {"success": True, "state": RoomState.EXPLORATION.value}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-# ============================================================
-# 11. API: ПЕРСОНАЖИ И НАВЫКИ (С ПРОВЕРКОЙ СОСТОЯНИЯ)
-# ============================================================
-
-@app.post("/api/character/create")
-async def create_character(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = Character(
-            name=data.get('name', 'Новый персонаж'),
-            surname=data.get('surname', ''),
-            nickname=data.get('nickname', ''),
-            portrait=data.get('portrait', ''),
-            token=data.get('token', ''),
-            description=data.get('description', ''),
-            biography=data.get('biography', ''),
-            class_name=data.get('class', ''),
-            race=data.get('race', ''),
-            background=data.get('background', ''),
-            alignment=data.get('alignment', ''),
-            armor_class=data.get('armor_class', 10),
-            speed=data.get('speed', 30),
-            max_hp=data.get('max_hp', 20),
-            current_hp=data.get('current_hp', 20),
-            temporary_hp=data.get('temporary_hp', 0),
-            player_id=user.id,
-            room_id=data.get('room_id'),
-            is_npc=data.get('is_npc', False),
-            created_by=user.id
-        )
-        character.stats = json.dumps(data.get('stats', {}))
-        character.skills = json.dumps(data.get('skills', []))
-        character.inventory = json.dumps(data.get('inventory', []))
-        character.equipment = json.dumps(data.get('equipment', {}))
-        character.effects = json.dumps(data.get('effects', []))
-        character.currency = json.dumps(data.get('currency', {}))
-        
-        session.add(character)
-        session.commit()
-        
         return {
             'success': True,
-            'character_id': character.id,
-            'character': character.to_dict()
+            'room_id': room.room_id,
+            'invite_link': f"/join/{room.room_id}"
         }
     except Exception as e:
         session.rollback()
         return {"success": False, "message": str(e)}
     finally:
         session.close()
-
-@app.get("/api/character/{character_id}")
-async def get_character(character_id: int):
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        return {'success': True, 'character': character.to_dict()}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.put("/api/character/{character_id}")
-async def update_character(character_id: int, data: dict, request: Request):
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        for key, value in data.items():
-            if hasattr(character, key):
-                setattr(character, key, value)
-        
-        session.commit()
-        
-        if character.room_id:
-            await manager.broadcast(character.room_id, {
-                'type': 'character_update',
-                'character_id': character.id,
-                'character': character.to_dict()
-            })
-        
-        return {'success': True, 'character': character.to_dict()}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/skill/create")
-async def create_custom_skill(request: Request, data: dict):
-    user = get_current_user(request)
-    if not user or user.role != 'gm':
-        return {"success": False, "message": "Только GM может создавать навыки"}
-    
-    session = Session()
-    try:
-        skill = CustomSkill(
-            name=data.get('name', 'Новый навык'),
-            icon=data.get('icon', ''),
-            description=data.get('description', ''),
-            dice_formula=data.get('dice_formula', '1d20'),
-            damage_formula=data.get('damage_formula', ''),
-            saving_throw=data.get('saving_throw', ''),
-            target_type=data.get('target_type', 'single'),
-            cost_type=data.get('cost_type', 'action'),
-            cost_value=data.get('cost_value', 1),
-            cooldown=data.get('cooldown', 0),
-            animation=data.get('animation', ''),
-            created_by=user.id,
-            room_id=data.get('room_id')
-        )
-        skill.effects = json.dumps(data.get('effects', []))
-        
-        session.add(skill)
-        session.commit()
-        
-        return {
-            'success': True,
-            'skill': skill.to_dict()
-        }
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-# ============================================================
-# 12. СТРАНИЦЫ
-# ============================================================
-
-@app.get("/")
-async def root(request: Request):
-    user = get_current_user(request)
-    if user:
-        if user.role == 'gm':
-            return RedirectResponse(url="/gm_dashboard", status_code=303)
-        else:
-            return RedirectResponse(url="/player_dashboard", status_code=303)
-    return RedirectResponse(url="/login", status_code=303)
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/login")
-async def login(request: Request, login_or_email: str = Form(...), password: str = Form(...), next: str = Form("")):
-    from itsdangerous import URLSafeTimedSerializer
-    serializer = URLSafeTimedSerializer("dnd_super_secret_key_2025")
-    user = get_user_by_login_or_email(login_or_email)
-    if not user or user.password_hash != hash_password(password):
-        return HTMLResponse(content="<h2>❌ Неверный логин/email или пароль</h2><a href='/login'>Вернуться</a>", status_code=400)
-    session_token = serializer.dumps({"user_id": user.id})
-    if next:
-        response = RedirectResponse(url=next, status_code=303)
-    elif user.role == 'gm':
-        response = RedirectResponse(url="/gm_dashboard", status_code=303)
-    else:
-        response = RedirectResponse(url="/player_dashboard", status_code=303)
-    response.set_cookie(key="session", value=session_token, httponly=True, max_age=604800)
-    return response
-
-@app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
-
-@app.post("/register")
-async def register(request: Request, login: str = Form(...), email: str = Form(...), password: str = Form(...), password_confirm: str = Form(...), role: str = Form("unassigned")):
-    if password != password_confirm:
-        return HTMLResponse(content="<h2>Ошибка: Пароли не совпадают</h2><a href='/register'>Назад</a>", status_code=400)
-    if len(password) < 8:
-        return HTMLResponse(content="<h2>Ошибка: Пароль должен быть не менее 8 символов</h2><a href='/register'>Назад</a>", status_code=400)
-    session = Session()
-    if session.query(User).filter_by(login=login).first():
-        session.close()
-        return HTMLResponse(content="<h2>Ошибка: Логин уже занят</h2><a href='/register'>Назад</a>", status_code=400)
-    if session.query(User).filter_by(email=email).first():
-        session.close()
-        return HTMLResponse(content="<h2>Ошибка: Email уже зарегистрирован</h2><a href='/register'>Назад</a>", status_code=400)
-    session.close()
-    user_id = create_user(login, email, password, role)
-    return RedirectResponse(url="/login?registered=true", status_code=303)
-
-@app.get("/logout")
-async def logout():
-    response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie("session")
-    return response
-
-@app.get("/gm_dashboard", response_class=HTMLResponse)
-async def gm_dashboard(request: Request):
-    user = get_current_user(request)
-    if not user or user.role != 'gm':
-        return RedirectResponse(url="/login", status_code=303)
-    
-    rooms = room_manager.get_rooms_by_gm(user.id)
-    return templates.TemplateResponse("gm_dashboard.html", {
-        "request": request,
-        "user": user,
-        "rooms": rooms
-    })
-
-@app.get("/player_dashboard", response_class=HTMLResponse)
-async def player_dashboard(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    session = Session()
-    player_rooms = session.query(GameRoom).join(RoomPlayer).filter(RoomPlayer.user_id == user.id).all()
-    session.close()
-    
-    return templates.TemplateResponse("player_dashboard.html", {
-        "request": request,
-        "user": user,
-        "rooms": player_rooms
-    })
-
-@app.get("/join/{room_id}", response_class=HTMLResponse)
-async def join_room_page(request: Request, room_id: str):
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse(url=f"/login?next=/join/{room_id}", status_code=303)
-    return RedirectResponse(url=f"/room/{room_id}", status_code=303)
 
 @app.get("/room/{room_id}", response_class=HTMLResponse)
 async def room_page(request: Request, room_id: str):
@@ -1080,128 +1206,45 @@ async def room_page(request: Request, room_id: str):
     if not user:
         return RedirectResponse(url=f"/login?next=/room/{room_id}", status_code=303)
     
-    room = room_manager.get_room(room_id)
+    session = Session()
+    room = session.query(GameRoom).filter_by(room_id=room_id).first()
     if not room:
+        session.close()
         return HTMLResponse(content="<h2>❌ Комната не найдена</h2><a href='/'>На главную</a>", status_code=404)
     
-    session = Session()
     room_player = session.query(RoomPlayer).filter_by(room_id=room.id, user_id=user.id).first()
     if not room_player:
+        session.close()
         return HTMLResponse(content="<h2>⛔ Вы не в этой комнате</h2><a href='/'>На главную</a>", status_code=403)
     
-    characters = session.query(Character).filter_by(room_id=room.id).all()
-    skills = session.query(CustomSkill).filter_by(room_id=room.id).all()
-    tokens = session.query(GameToken).filter_by(room_id=room.id).all()
+    # Получаем персонажа игрока
+    character = None
+    if room_player.character_id:
+        character = session.query(Character).filter_by(id=room_player.character_id).first()
+    
     session.close()
     
-    state_manager = room_manager.get_state_manager(room.id)
-    state = state_manager.state if state_manager else None
+    # Используем UI шаблон
+    from jinja2 import Template
+    template = Template(UI_TEMPLATE)
+    html = template.render(
+        room=room,
+        user=user,
+        character=character,
+        is_gm=room.gm_id == user.id
+    )
     
-    return templates.TemplateResponse("room.html", {
-        "request": request,
-        "user": user,
-        "room": room,
-        "characters": characters,
-        "skills": skills,
-        "tokens": tokens,
-        "is_gm": room.gm_id == user.id,
-        "current_state": state.value if state else None
-    })
+    return HTMLResponse(content=html)
+
+@app.get("/join/{room_id}")
+async def join_room(request: Request, room_id: str):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url=f"/login?next=/join/{room_id}", status_code=303)
+    return RedirectResponse(url=f"/room/{room_id}", status_code=303)
 
 # ============================================================
-# 13. WEBSOCKET (С ПОДДЕРЖКОЙ STATE)
-# ============================================================
-
-@app.websocket("/ws/room/{room_id}")
-async def room_websocket(websocket: WebSocket, room_id: str):
-    await websocket.accept()
-    
-    room = room_manager.get_room(room_id)
-    if not room:
-        await websocket.send_text(json.dumps({
-            'type': 'error',
-            'message': 'Комната не найдена'
-        }))
-        await websocket.close()
-        return
-    
-    user = get_current_user(websocket)  # В реальном проекте нужно передавать токен
-    
-    await manager.connect(websocket, room.id, user.id if user else 0)
-    
-    # Отправляем текущее состояние комнаты
-    state_manager = room_manager.get_state_manager(room.id)
-    if state_manager and state_manager.state:
-        await websocket.send_text(json.dumps({
-            'type': 'room_state',
-            'state': state_manager.state.value,
-            'state_name': state_manager.state.name
-        }))
-    
-    try:
-        while True:
-            data = await websocket.receive_text()
-            try:
-                msg = json.loads(data)
-                msg_type = msg.get('type')
-                
-                if msg_type == 'chat':
-                    await manager.broadcast(room.id, {
-                        'type': 'chat',
-                        'user_id': msg.get('user_id'),
-                        'username': msg.get('username', 'Unknown'),
-                        'text': msg.get('text', ''),
-                        'timestamp': datetime.now().isoformat()
-                    })
-                
-                elif msg_type == 'move':
-                    # Проверяем, разрешено ли движение
-                    if state_manager and not state_manager.can_execute_action(ActionCategory.MOVE):
-                        await websocket.send_text(json.dumps({
-                            'type': 'error',
-                            'message': f'Движение запрещено в состоянии {state_manager.state.value}'
-                        }))
-                        continue
-                    
-                    await manager.broadcast(room.id, {
-                        'type': 'move',
-                        'token_id': msg.get('token_id'),
-                        'x': msg.get('x'),
-                        'y': msg.get('y')
-                    })
-                
-                elif msg_type == 'action':
-                    # Проверяем разрешение на действие
-                    action_str = msg.get('action_type')
-                    if action_str and state_manager:
-                        try:
-                            action = ActionCategory(action_str)
-                            user_role = 'gm' if room.gm_id == user.id else 'player'
-                            if not state_manager.can_execute_action(action, user_role):
-                                await websocket.send_text(json.dumps({
-                                    'type': 'error',
-                                    'message': f'Действие {action_str} запрещено в состоянии {state_manager.state.value}'
-                                }))
-                                continue
-                        except ValueError:
-                            pass
-                    
-                    await manager.broadcast(room.id, {
-                        'type': 'action_result',
-                        'action_type': msg.get('action_type'),
-                        'result': msg.get('result', {}),
-                        'user_id': msg.get('user_id'),
-                        'timestamp': datetime.now().isoformat()
-                    })
-                    
-            except json.JSONDecodeError:
-                pass
-                
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-# ============================================================
-# 14. ЗАПУСК
+# 8. ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
