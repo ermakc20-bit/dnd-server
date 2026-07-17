@@ -13,12 +13,45 @@ import uuid
 import random
 import math
 import re
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum
 
 # ============================================================
-# 1. БАЗА ДАННЫХ — НОВАЯ ФИЛОСОФИЯ ПЕРСОНАЖЕЙ
+# 1. ENUMS — СОСТОЯНИЯ КОМНАТЫ
+# ============================================================
+
+class RoomState(str, Enum):
+    """Состояния игровой комнаты (Game Flow)."""
+    PREPARATION = "preparation"              # Подготовка (только GM)
+    CHARACTER_SELECTION = "character_selection"  # Выбор персонажей
+    WAITING_FOR_PLAYERS = "waiting_for_players"  # Ожидание игроков
+    EXPLORATION = "exploration"              # Исследование (основное состояние)
+    DIALOG = "dialog"                        # Диалог / катсцена
+    CHECK = "check"                          # Проверка (навык, характеристика)
+    COMBAT = "combat"                        # Бой
+    CUTSCENE = "cutscene"                    # Катсцена (всё заблокировано)
+    PAUSED = "paused"                        # Пауза
+    FINISHED = "finished"                    # Завершено
+
+class ActionCategory(str, Enum):
+    """Категории действий для проверки разрешений."""
+    MOVE = "move"
+    ATTACK = "attack"
+    USE_SKILL = "use_skill"
+    USE_ITEM = "use_item"
+    TALK = "talk"
+    INTERACT = "interact"
+    OPEN_DOOR = "open_door"
+    READ = "read"
+    CHECK = "check"
+    CAST_SPELL = "cast_spell"
+    DIALOGUE = "dialogue"
+    COMBAT_ACTION = "combat_action"
+    ADMIN = "admin"
+
+# ============================================================
+# 2. БАЗА ДАННЫХ
 # ============================================================
 
 Base = declarative_base()
@@ -34,272 +67,86 @@ class User(Base):
     role = Column(String, default='unassigned')
     created_at = Column(DateTime, default=datetime.now)
 
-class Settings(Base):
-    __tablename__ = 'settings'
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-    description = Column(String)
-    theme = Column(String)
-    background_image = Column(String)
-
-# ============================================================
-# 2. УНИВЕРСАЛЬНЫЙ ПЕРСОНАЖ (БЕЗ ЖЁСТКИХ ПОЛЕЙ)
-# ============================================================
-
 class Character(Base):
-    """
-    Универсальный персонаж для ЛЮБОГО сеттинга.
-    Никакой привязки к D&D или конкретной системе.
-    """
     __tablename__ = 'characters'
-    
-    # === БАЗОВАЯ ИДЕНТИФИКАЦИЯ ===
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     surname = Column(String(100), default='')
     nickname = Column(String(100), default='')
-    
-    # === ВНЕШНИЙ ВИД ===
     portrait = Column(String(255), default='')
     token = Column(String(255), default='')
     description = Column(Text, default='')
     biography = Column(Text, default='')
-    
-    # === ГИБКИЕ ПОЛЯ (ПРОСТО СТРОКИ) ===
-    class_name = Column(String(100), default='')  # Любой класс: Воин, Репортёр, Инквизитор
-    race = Column(String(100), default='')        # Любая раса: Человек, Вампир, Киборг
-    background = Column(String(100), default='')  # Любой бэкграунд
-    alignment = Column(String(50), default='')    # Любое мировоззрение
-    
-    # === БАЗОВЫЕ БОЕВЫЕ ПАРАМЕТРЫ (ОПЦИОНАЛЬНО) ===
+    class_name = Column(String(100), default='')
+    race = Column(String(100), default='')
+    background = Column(String(100), default='')
+    alignment = Column(String(50), default='')
     armor_class = Column(Integer, default=10)
     speed = Column(Integer, default=30)
     max_hp = Column(Integer, default=20)
     current_hp = Column(Integer, default=20)
     temporary_hp = Column(Integer, default=0)
-    
-    # === ВАЛЮТА (ГИБКАЯ) ===
-    currency = Column(JSON, default='{}')  # {"gold": 100, "credits": 50, "pounds": 10}
-    
-    # === ДИНАМИЧЕСКИЕ ХАРАКТЕРИСТИКИ ===
+    currency = Column(JSON, default='{}')
     stats = Column(JSON, default='{}')
-    # {"strength": 10, "dexterity": 14, "constitution": 12,
-    #  "influence": 8, "fear": 5, "will": 10}
-    
-    # === ДИНАМИЧЕСКИЕ НАВЫКИ ===
     skills = Column(JSON, default='[]')
-    # [{"id": "skill_1", "name": "Взлом", "value": 12},
-    #  {"id": "skill_2", "name": "Убеждение", "value": 8}]
-    
-    # === ИНВЕНТАРЬ (ПОЛНОСТЬЮ РУЧНОЙ) ===
     inventory = Column(JSON, default='[]')
-    # [{"id": "item_1", "name": "Меч", "quantity": 1, "description": "Ржавый меч"},
-    #  {"id": "item_2", "name": "Улика", "quantity": 1, "description": "Кровавый отпечаток"}]
-    
-    # === ЭКИПИРОВКА ===
     equipment = Column(JSON, default='{}')
-    # {"main_hand": null, "off_hand": null, "armor": null}
-    
-    # === ЭФФЕКТЫ ===
     effects = Column(JSON, default='[]')
-    
-    # === МЕТАДАННЫЕ ===
     player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     room_id = Column(Integer, ForeignKey('game_rooms.id'), nullable=True)
     is_npc = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
-    
-    # === СВЯЗИ ===
     owner = relationship("User", foreign_keys=[created_by])
     player = relationship("User", foreign_keys=[player_id])
-    
-    def to_dict(self) -> dict:
-        """Преобразует персонажа в словарь для API."""
-        return {
-            'id': self.id,
-            'name': self.name,
-            'surname': self.surname,
-            'nickname': self.nickname,
-            'portrait': self.portrait,
-            'token': self.token,
-            'description': self.description,
-            'biography': self.biography,
-            'class': self.class_name,
-            'race': self.race,
-            'background': self.background,
-            'alignment': self.alignment,
-            'armor_class': self.armor_class,
-            'speed': self.speed,
-            'max_hp': self.max_hp,
-            'current_hp': self.current_hp,
-            'temporary_hp': self.temporary_hp,
-            'currency': json.loads(self.currency) if self.currency else {},
-            'stats': json.loads(self.stats) if self.stats else {},
-            'skills': json.loads(self.skills) if self.skills else [],
-            'inventory': json.loads(self.inventory) if self.inventory else [],
-            'equipment': json.loads(self.equipment) if self.equipment else {},
-            'effects': json.loads(self.effects) if self.effects else [],
-            'is_npc': self.is_npc,
-            'player_id': self.player_id,
-            'room_id': self.room_id
-        }
-    
-    def get_stat(self, stat_name: str) -> int:
-        """Получает значение характеристики по имени."""
-        stats = json.loads(self.stats) if self.stats else {}
-        return stats.get(stat_name, 10)
-    
-    def set_stat(self, stat_name: str, value: int):
-        """Устанавливает значение характеристики."""
-        stats = json.loads(self.stats) if self.stats else {}
-        stats[stat_name] = value
-        self.stats = json.dumps(stats)
-    
-    def get_skill(self, skill_name: str) -> Optional[dict]:
-        """Получает навык по имени."""
-        skills = json.loads(self.skills) if self.skills else []
-        for skill in skills:
-            if skill.get('name') == skill_name:
-                return skill
-        return None
-    
-    def add_skill(self, skill_data: dict):
-        """Добавляет навык."""
-        skills = json.loads(self.skills) if self.skills else []
-        skills.append(skill_data)
-        self.skills = json.dumps(skills)
-    
-    def remove_skill(self, skill_id: str):
-        """Удаляет навык."""
-        skills = json.loads(self.skills) if self.skills else []
-        skills = [s for s in skills if s.get('id') != skill_id]
-        self.skills = json.dumps(skills)
-    
-    def add_item(self, item_data: dict):
-        """Добавляет предмет в инвентарь."""
-        inventory = json.loads(self.inventory) if self.inventory else []
-        inventory.append(item_data)
-        self.inventory = json.dumps(inventory)
-    
-    def remove_item(self, item_id: str):
-        """Удаляет предмет из инвентаря."""
-        inventory = json.loads(self.inventory) if self.inventory else []
-        inventory = [i for i in inventory if i.get('id') != item_id]
-        self.inventory = json.dumps(inventory)
-    
-    def get_currency(self, currency_type: str) -> int:
-        """Получает количество валюты определённого типа."""
-        currency = json.loads(self.currency) if self.currency else {}
-        return currency.get(currency_type, 0)
-    
-    def set_currency(self, currency_type: str, amount: int):
-        """Устанавливает количество валюты."""
-        currency = json.loads(self.currency) if self.currency else {}
-        currency[currency_type] = amount
-        self.currency = json.dumps(currency)
-    
-    def add_currency(self, currency_type: str, amount: int):
-        """Добавляет валюту."""
-        current = self.get_currency(currency_type)
-        self.set_currency(currency_type, current + amount)
-    
-    def remove_currency(self, currency_type: str, amount: int) -> bool:
-        """Удаляет валюту. Возвращает True, если достаточно."""
-        current = self.get_currency(currency_type)
-        if current < amount:
-            return False
-        self.set_currency(currency_type, current - amount)
-        return True
-    
-    def add_effect(self, effect_data: dict):
-        """Добавляет эффект."""
-        effects = json.loads(self.effects) if self.effects else []
-        effects.append(effect_data)
-        self.effects = json.dumps(effects)
-    
-    def remove_effect(self, effect_id: str):
-        """Удаляет эффект."""
-        effects = json.loads(self.effects) if self.effects else []
-        effects = [e for e in effects if e.get('id') != effect_id]
-        self.effects = json.dumps(effects)
-
-# ============================================================
-# 3. КАСТОМНЫЕ НАВЫКИ (СОЗДАЮТСЯ ГМ)
-# ============================================================
 
 class CustomSkill(Base):
-    """Навык, созданный ГМ. Не привязан к системе."""
     __tablename__ = 'custom_skills'
-    
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     icon = Column(String(255), default='')
     description = Column(Text, default='')
-    
-    # Механики навыка
-    dice_formula = Column(String(50), default='1d20')  # Например: 1d20, 2d6, 1d100
-    damage_formula = Column(String(50), default='')    # Например: 1d8+3
-    saving_throw = Column(String(50), default='')      # Например: dex, con, will
-    target_type = Column(String(50), default='single') # single, area, self
-    
-    # Стоимость и перезарядка
-    cost_type = Column(String(50), default='action')   # action, bonus, reaction, free
+    dice_formula = Column(String(50), default='1d20')
+    damage_formula = Column(String(50), default='')
+    saving_throw = Column(String(50), default='')
+    target_type = Column(String(50), default='single')
+    cost_type = Column(String(50), default='action')
     cost_value = Column(Integer, default=1)
     cooldown = Column(Integer, default=0)
-    
-    # Эффекты
     effects = Column(JSON, default='[]')
-    
-    # Визуал
     animation = Column(String(100), default='')
-    
-    # Метаданные
     created_by = Column(Integer, ForeignKey('users.id'))
     room_id = Column(Integer, ForeignKey('game_rooms.id'))
     created_at = Column(DateTime, default=datetime.now)
-    
-    def to_dict(self) -> dict:
-        return {
-            'id': self.id,
-            'name': self.name,
-            'icon': self.icon,
-            'description': self.description,
-            'dice_formula': self.dice_formula,
-            'damage_formula': self.damage_formula,
-            'saving_throw': self.saving_throw,
-            'target_type': self.target_type,
-            'cost_type': self.cost_type,
-            'cost_value': self.cost_value,
-            'cooldown': self.cooldown,
-            'effects': json.loads(self.effects) if self.effects else [],
-            'animation': self.animation
-        }
-
-# ============================================================
-# 4. ИГРОВЫЕ КОМНАТЫ
-# ============================================================
 
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
     id = Column(Integer, primary_key=True)
     room_id = Column(String(36), unique=True, nullable=False)
     name = Column(String(100), nullable=False)
+    description = Column(Text, default='')
     gm_id = Column(Integer, ForeignKey('users.id'))
     password_hash = Column(String, nullable=True)
-    state = Column(String(20), default='lobby')
+    state = Column(String(20), default=RoomState.PREPARATION)
     max_players = Column(Integer, default=6)
     is_private = Column(Boolean, default=False)
     current_map = Column(String(255), default='')
     current_scene = Column(String(100), default='')
+    # Данные для боя
+    current_round = Column(Integer, default=0)
+    current_turn = Column(Integer, default=0)
+    current_player_id = Column(Integer, nullable=True)
+    initiative_order = Column(JSON, default='[]')
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     gm = relationship("User", foreign_keys=[gm_id])
-    tokens = relationship("GameToken", backref="room")
+    tokens = relationship("GameToken", backref="room", cascade="all, delete-orphan")
     players = relationship("RoomPlayer", backref="room", cascade="all, delete-orphan")
     custom_skills = relationship("CustomSkill", backref="room", cascade="all, delete-orphan")
+    characters = relationship("Character", backref="room", cascade="all, delete-orphan")
+    action_logs = relationship("ActionLog", backref="room", cascade="all, delete-orphan")
 
 class RoomPlayer(Base):
     __tablename__ = 'room_players'
@@ -350,7 +197,146 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 5. МИГРАЦИЯ
+# 3. GAME STATE MANAGER (СЕРДЦЕ GAME FLOW)
+# ============================================================
+
+class GameStateManager:
+    """
+    Управляет состоянием игровой комнаты.
+    Никакой модуль не может изменить состояние напрямую.
+    """
+    
+    # Разрешённые действия для каждого состояния
+    _state_permissions: Dict[RoomState, Set[ActionCategory]] = {
+        RoomState.PREPARATION: {
+            ActionCategory.ADMIN
+        },
+        RoomState.CHARACTER_SELECTION: {
+            ActionCategory.TALK,
+            ActionCategory.CHECK
+        },
+        RoomState.WAITING_FOR_PLAYERS: {
+            ActionCategory.TALK
+        },
+        RoomState.EXPLORATION: {
+            ActionCategory.MOVE,
+            ActionCategory.TALK,
+            ActionCategory.INTERACT,
+            ActionCategory.OPEN_DOOR,
+            ActionCategory.READ,
+            ActionCategory.CHECK,
+            ActionCategory.USE_ITEM,
+            ActionCategory.USE_SKILL,
+            ActionCategory.CAST_SPELL,
+            ActionCategory.DIALOGUE
+        },
+        RoomState.DIALOG: {
+            ActionCategory.TALK,
+            ActionCategory.DIALOGUE,
+            ActionCategory.CHECK
+        },
+        RoomState.CHECK: {
+            ActionCategory.CHECK
+        },
+        RoomState.COMBAT: {
+            ActionCategory.COMBAT_ACTION,
+            ActionCategory.USE_ITEM,
+            ActionCategory.TALK
+        },
+        RoomState.CUTSCENE: set(),  # Всё запрещено
+        RoomState.PAUSED: set(),    # Всё запрещено
+        RoomState.FINISHED: set()   # Всё запрещено
+    }
+    
+    # Допустимые переходы между состояниями
+    _allowed_transitions: Dict[RoomState, List[RoomState]] = {
+        RoomState.PREPARATION: [RoomState.CHARACTER_SELECTION, RoomState.FINISHED],
+        RoomState.CHARACTER_SELECTION: [RoomState.WAITING_FOR_PLAYERS, RoomState.EXPLORATION, RoomState.PREPARATION],
+        RoomState.WAITING_FOR_PLAYERS: [RoomState.CHARACTER_SELECTION, RoomState.EXPLORATION],
+        RoomState.EXPLORATION: [RoomState.DIALOG, RoomState.CHECK, RoomState.COMBAT, RoomState.PAUSED, RoomState.FINISHED, RoomState.CUTSCENE],
+        RoomState.DIALOG: [RoomState.EXPLORATION, RoomState.CHECK, RoomState.COMBAT, RoomState.FINISHED],
+        RoomState.CHECK: [RoomState.DIALOG, RoomState.EXPLORATION],
+        RoomState.COMBAT: [RoomState.EXPLORATION, RoomState.PAUSED, RoomState.FINISHED],
+        RoomState.CUTSCENE: [RoomState.EXPLORATION, RoomState.DIALOG, RoomState.FINISHED],
+        RoomState.PAUSED: [RoomState.EXPLORATION, RoomState.COMBAT, RoomState.DIALOG],
+        RoomState.FINISHED: []
+    }
+    
+    def __init__(self, room_id: int):
+        self.room_id = room_id
+        self._state: Optional[RoomState] = None
+        self._callbacks: List[callable] = []
+    
+    @property
+    def state(self) -> Optional[RoomState]:
+        return self._state
+    
+    def set_state(self, new_state: RoomState, session: Session, broadcast: bool = True) -> bool:
+        """
+        Устанавливает новое состояние комнаты.
+        Возвращает True, если переход разрешён и выполнен.
+        """
+        if self._state and new_state not in self._allowed_transitions.get(self._state, []):
+            return False
+        
+        # Обновляем в БД
+        room = session.query(GameRoom).filter_by(id=self.room_id).first()
+        if not room:
+            return False
+        
+        room.state = new_state.value
+        session.commit()
+        
+        self._state = new_state
+        
+        # Уведомляем всех в комнате
+        if broadcast:
+            import asyncio
+            asyncio.create_task(self._broadcast_state_change(new_state))
+        
+        # Вызываем колбэки
+        for callback in self._callbacks:
+            callback(new_state)
+        
+        return True
+    
+    def get_state(self) -> Optional[RoomState]:
+        return self._state
+    
+    def can_execute_action(self, action: ActionCategory, user_role: str = 'player') -> bool:
+        """
+        Проверяет, разрешено ли действие в текущем состоянии.
+        GM всегда может всё.
+        """
+        if user_role == 'gm':
+            return True
+        
+        if self._state is None:
+            return False
+        
+        allowed = self._state_permissions.get(self._state, set())
+        return action in allowed
+    
+    def lock_actions(self):
+        """Блокирует все действия (для CUTSCENE, PAUSED)."""
+        # Временно устанавливаем состояние, которое блокирует всё
+        pass
+    
+    def unlock_actions(self):
+        """Разблокирует действия."""
+        pass
+    
+    def register_callback(self, callback: callable):
+        """Регистрирует callback при смене состояния."""
+        self._callbacks.append(callback)
+    
+    async def _broadcast_state_change(self, new_state: RoomState):
+        """Отправляет изменение состояния всем клиентам."""
+        from app import manager  # Импорт из основного модуля
+        await manager.broadcast_state(self.room_id, new_state)
+
+# ============================================================
+# 4. МИГРАЦИЯ
 # ============================================================
 
 def migrate_database():
@@ -379,7 +365,7 @@ Base.metadata.create_all(engine)
 migrate_database()
 
 # ============================================================
-# 6. FASTAPI
+# 5. FASTAPI
 # ============================================================
 
 app = FastAPI()
@@ -394,7 +380,7 @@ os.makedirs(MAP_DIR, exist_ok=True)
 connections = {}
 
 # ============================================================
-# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================
 
 def hash_password(password):
@@ -440,12 +426,424 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 8. API: ПЕРСОНАЖИ (НОВАЯ ФИЛОСОФИЯ)
+# 7. ROOM MANAGER
+# ============================================================
+
+class RoomManager:
+    def __init__(self):
+        self._rooms: Dict[str, GameRoom] = {}
+        self._state_managers: Dict[int, GameStateManager] = {}
+
+    def create_room(self, name: str, description: str, gm_id: int, max_players: int = 6, is_private: bool = False, password: str = None) -> GameRoom:
+        room_id = generate_room_id()
+        session = Session()
+        try:
+            room = GameRoom(
+                room_id=room_id,
+                name=name,
+                description=description,
+                gm_id=gm_id,
+                max_players=max_players,
+                is_private=is_private,
+                password_hash=hash_password(password) if password else None,
+                state=RoomState.PREPARATION
+            )
+            session.add(room)
+            session.commit()
+            
+            room_player = RoomPlayer(
+                room_id=room.id,
+                user_id=gm_id,
+                role='gm',
+                is_ready=True
+            )
+            session.add(room_player)
+            session.commit()
+            session.refresh(room)
+            
+            # Создаём GameStateManager для комнаты
+            self._state_managers[room.id] = GameStateManager(room.id)
+            self._state_managers[room.id]._state = RoomState.PREPARATION
+            
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+        return room
+
+    def get_room(self, room_id: str) -> Optional[GameRoom]:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        session.close()
+        return room
+
+    def get_room_by_id(self, room_id: int) -> Optional[GameRoom]:
+        session = Session()
+        room = session.query(GameRoom).filter_by(id=room_id).first()
+        session.close()
+        return room
+
+    def get_state_manager(self, room_id: int) -> Optional[GameStateManager]:
+        return self._state_managers.get(room_id)
+
+    def get_rooms_by_gm(self, gm_id: int) -> List[GameRoom]:
+        session = Session()
+        rooms = session.query(GameRoom).filter_by(gm_id=gm_id).filter(GameRoom.state != RoomState.FINISHED).all()
+        session.close()
+        return rooms
+
+    def get_all_rooms(self) -> List[GameRoom]:
+        session = Session()
+        rooms = session.query(GameRoom).filter(GameRoom.state != RoomState.FINISHED).all()
+        session.close()
+        return rooms
+
+    def get_room_players(self, room_id: str) -> List[dict]:
+        session = Session()
+        players = session.query(RoomPlayer).filter_by(room_id=room_id).all()
+        result = []
+        for p in players:
+            user = session.query(User).filter_by(id=p.user_id).first()
+            character = session.query(Character).filter_by(id=p.character_id).first() if p.character_id else None
+            result.append({
+                'user_id': p.user_id,
+                'login': user.login if user else 'Unknown',
+                'role': p.role,
+                'is_ready': p.is_ready,
+                'character_id': p.character_id,
+                'character_name': character.name if character else None
+            })
+        session.close()
+        return result
+
+room_manager = RoomManager()
+
+# ============================================================
+# 8. CONNECTION MANAGER (С ПОДДЕРЖКОЙ STATE)
+# ============================================================
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+        self.user_connections: Dict[int, int] = {}
+        self.connection_users: Dict[WebSocket, int] = {}
+        self.connection_rooms: Dict[WebSocket, int] = {}
+
+    async def connect(self, websocket: WebSocket, room_id: int, user_id: int):
+        await websocket.accept()
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = []
+        self.active_connections[room_id].append(websocket)
+        self.connection_users[websocket] = user_id
+        self.connection_rooms[websocket] = room_id
+        self.user_connections[user_id] = room_id
+
+    def disconnect(self, websocket: WebSocket):
+        room_id = self.connection_rooms.get(websocket)
+        user_id = self.connection_users.get(websocket)
+        if room_id and room_id in self.active_connections:
+            if websocket in self.active_connections[room_id]:
+                self.active_connections[room_id].remove(websocket)
+            if not self.active_connections[room_id]:
+                del self.active_connections[room_id]
+        if user_id and user_id in self.user_connections:
+            del self.user_connections[user_id]
+        if websocket in self.connection_users:
+            del self.connection_users[websocket]
+        if websocket in self.connection_rooms:
+            del self.connection_rooms[websocket]
+
+    async def broadcast(self, room_id: int, message: dict, exclude: List[WebSocket] = None):
+        if room_id not in self.active_connections:
+            return
+        exclude = exclude or []
+        for connection in self.active_connections[room_id]:
+            if connection not in exclude:
+                try:
+                    await connection.send_text(json.dumps(message))
+                except:
+                    pass
+
+    async def broadcast_state(self, room_id: int, new_state: RoomState):
+        """Отправляет изменение состояния всем в комнате."""
+        await self.broadcast(room_id, {
+            'type': 'room_state_changed',
+            'state': new_state.value,
+            'state_name': new_state.name,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def get_user_id(self, websocket: WebSocket) -> Optional[int]:
+        return self.connection_users.get(websocket)
+
+    def get_room_id(self, websocket: WebSocket) -> Optional[int]:
+        return self.connection_rooms.get(websocket)
+
+manager = ConnectionManager()
+
+# ============================================================
+# 9. API: GAME FLOW (УПРАВЛЕНИЕ СОСТОЯНИЕМ)
+# ============================================================
+
+@app.post("/api/room/state/change")
+async def change_room_state(request: Request, data: dict):
+    """Изменяет состояние комнаты (только через GameStateManager)."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id = data.get('room_id')
+    new_state_str = data.get('state')
+    
+    if not room_id or not new_state_str:
+        return {"success": False, "message": "Не указаны room_id или state"}
+    
+    # Получаем комнату
+    room = room_manager.get_room(room_id)
+    if not room:
+        return {"success": False, "message": "Комната не найдена"}
+    
+    # Только GM может менять состояние
+    if room.gm_id != user.id:
+        return {"success": False, "message": "Только GM может менять состояние комнаты"}
+    
+    try:
+        new_state = RoomState(new_state_str)
+    except ValueError:
+        return {"success": False, "message": f"Неизвестное состояние: {new_state_str}"}
+    
+    # Получаем State Manager
+    state_manager = room_manager.get_state_manager(room.id)
+    if not state_manager:
+        return {"success": False, "message": "State Manager не найден"}
+    
+    session = Session()
+    try:
+        success = state_manager.set_state(new_state, session, broadcast=True)
+        if not success:
+            return {"success": False, "message": f"Переход из {state_manager.state} в {new_state} запрещён"}
+        return {"success": True, "state": new_state.value}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.get("/api/room/{room_id}/state")
+async def get_room_state(room_id: str):
+    """Получает текущее состояние комнаты."""
+    room = room_manager.get_room(room_id)
+    if not room:
+        return {"success": False, "message": "Комната не найдена"}
+    
+    state_manager = room_manager.get_state_manager(room.id)
+    if not state_manager:
+        return {"success": False, "message": "State Manager не найден"}
+    
+    return {
+        'success': True,
+        'state': state_manager.state.value if state_manager.state else None,
+        'state_name': state_manager.state.name if state_manager.state else None,
+        'allowed_actions': [a.value for a in GameStateManager._state_permissions.get(state_manager.state, set())]
+    }
+
+@app.post("/api/action/check")
+async def check_action_permission(request: Request, data: dict):
+    """Проверяет, разрешено ли действие в текущем состоянии."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id = data.get('room_id')
+    action_str = data.get('action')
+    
+    if not room_id or not action_str:
+        return {"success": False, "message": "Не указаны room_id или action"}
+    
+    room = room_manager.get_room(room_id)
+    if not room:
+        return {"success": False, "message": "Комната не найдена"}
+    
+    state_manager = room_manager.get_state_manager(room.id)
+    if not state_manager:
+        return {"success": False, "message": "State Manager не найден"}
+    
+    try:
+        action = ActionCategory(action_str)
+    except ValueError:
+        return {"success": False, "message": f"Неизвестное действие: {action_str}"}
+    
+    # Определяем роль пользователя
+    user_role = 'gm' if room.gm_id == user.id else 'player'
+    
+    allowed = state_manager.can_execute_action(action, user_role)
+    return {
+        'success': True,
+        'allowed': allowed,
+        'state': state_manager.state.value if state_manager.state else None,
+        'action': action_str,
+        'role': user_role
+    }
+
+# ============================================================
+# 10. API: КОМНАТЫ (С СОСТОЯНИЕМ)
+# ============================================================
+
+@app.post("/api/room/create")
+async def create_room(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    if user.role != 'gm':
+        return {"success": False, "message": "Только GM может создавать комнаты"}
+    
+    name = data.get('name', '').strip()
+    if not name:
+        return {"success": False, "message": "Введите название комнаты"}
+    
+    try:
+        room = room_manager.create_room(
+            name=name,
+            description=data.get('description', ''),
+            gm_id=user.id,
+            max_players=data.get('max_players', 6),
+            is_private=data.get('is_private', False),
+            password=data.get('password')
+        )
+        return {
+            'success': True,
+            'room': room.to_dict(),
+            'state': RoomState.PREPARATION.value,
+            'invite_link': f"/join/{room.room_id}"
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@app.get("/api/rooms")
+async def get_all_rooms():
+    rooms = room_manager.get_all_rooms()
+    return {
+        'success': True,
+        'rooms': [r.to_dict() for r in rooms]
+    }
+
+@app.get("/api/rooms/gm/{gm_id}")
+async def get_gm_rooms(gm_id: int):
+    rooms = room_manager.get_rooms_by_gm(gm_id)
+    return {
+        'success': True,
+        'rooms': [r.to_dict() for r in rooms]
+    }
+
+@app.get("/api/room/{room_id}")
+async def get_room(room_id: str):
+    room = room_manager.get_room(room_id)
+    if not room:
+        return {"success": False, "message": "Комната не найдена"}
+    players = room_manager.get_room_players(room_id)
+    
+    state_manager = room_manager.get_state_manager(room.id)
+    state = state_manager.state if state_manager else None
+    
+    return {
+        'success': True,
+        'room': room.to_dict(),
+        'players': players,
+        'state': state.value if state else None
+    }
+
+@app.post("/api/room/join")
+async def join_room(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id = data.get('room_id')
+    password = data.get('password')
+    
+    if not room_id:
+        return {"success": False, "message": "Не указан room_id"}
+    
+    session = Session()
+    try:
+        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        if not room:
+            return {"success": False, "message": "Комната не найдена"}
+        
+        if room.state == RoomState.FINISHED:
+            return {"success": False, "message": "Комната завершена"}
+        
+        if room.is_private and room.password_hash:
+            if not password or hash_password(password) != room.password_hash:
+                return {"success": False, "message": "Неверный пароль"}
+        
+        existing = session.query(RoomPlayer).filter_by(room_id=room.id, user_id=user.id).first()
+        if existing:
+            return {'success': True, 'message': 'Вы уже в комнате', 'room': room.to_dict()}
+        
+        players_count = session.query(RoomPlayer).filter_by(room_id=room.id).count()
+        if players_count >= room.max_players:
+            return {"success": False, "message": "Комната заполнена"}
+        
+        room_player = RoomPlayer(
+            room_id=room.id,
+            user_id=user.id,
+            role='player',
+            is_ready=False
+        )
+        session.add(room_player)
+        session.commit()
+        session.refresh(room)
+        
+        return {'success': True, 'room': room.to_dict()}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.post("/api/room/start")
+async def start_room(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    room_id = data.get('room_id')
+    if not room_id:
+        return {"success": False, "message": "Не указан room_id"}
+    
+    room = room_manager.get_room(room_id)
+    if not room:
+        return {"success": False, "message": "Комната не найдена"}
+    
+    if room.gm_id != user.id:
+        return {"success": False, "message": "Только GM может начать игру"}
+    
+    state_manager = room_manager.get_state_manager(room.id)
+    if not state_manager:
+        return {"success": False, "message": "State Manager не найден"}
+    
+    session = Session()
+    try:
+        # Переход в EXPLORATION через GameStateManager
+        success = state_manager.set_state(RoomState.EXPLORATION, session, broadcast=True)
+        if not success:
+            return {"success": False, "message": "Не удалось начать игру"}
+        
+        return {"success": True, "state": RoomState.EXPLORATION.value}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+# ============================================================
+# 11. API: ПЕРСОНАЖИ И НАВЫКИ (С ПРОВЕРКОЙ СОСТОЯНИЯ)
 # ============================================================
 
 @app.post("/api/character/create")
 async def create_character(request: Request, data: dict):
-    """Создаёт персонажа для ЛЮБОГО сеттинга."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
@@ -474,8 +872,6 @@ async def create_character(request: Request, data: dict):
             is_npc=data.get('is_npc', False),
             created_by=user.id
         )
-        
-        # Инициализируем пустые JSON поля
         character.stats = json.dumps(data.get('stats', {}))
         character.skills = json.dumps(data.get('skills', []))
         character.inventory = json.dumps(data.get('inventory', []))
@@ -499,7 +895,6 @@ async def create_character(request: Request, data: dict):
 
 @app.get("/api/character/{character_id}")
 async def get_character(character_id: int):
-    """Получает персонажа."""
     session = Session()
     try:
         character = session.query(Character).filter_by(id=character_id).first()
@@ -512,8 +907,7 @@ async def get_character(character_id: int):
         session.close()
 
 @app.put("/api/character/{character_id}")
-async def update_character(character_id: int, data: dict):
-    """Обновляет персонажа (любые поля)."""
+async def update_character(character_id: int, data: dict, request: Request):
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
@@ -524,16 +918,14 @@ async def update_character(character_id: int, data: dict):
         if not character:
             return {"success": False, "message": "Персонаж не найден"}
         
-        # Обновляем все переданные поля
         for key, value in data.items():
             if hasattr(character, key):
                 setattr(character, key, value)
         
         session.commit()
         
-        # Уведомляем через WebSocket
         if character.room_id:
-            await broadcast_to_room(character.room_id, {
+            await manager.broadcast(character.room_id, {
                 'type': 'character_update',
                 'character_id': character.id,
                 'character': character.to_dict()
@@ -546,185 +938,8 @@ async def update_character(character_id: int, data: dict):
     finally:
         session.close()
 
-@app.post("/api/character/{character_id}/stat")
-async def update_character_stat(character_id: int, data: dict):
-    """Обновляет конкретную характеристику."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        stat_name = data.get('stat_name')
-        stat_value = data.get('stat_value')
-        
-        if not stat_name or stat_value is None:
-            return {"success": False, "message": "Не указаны stat_name или stat_value"}
-        
-        character.set_stat(stat_name, stat_value)
-        session.commit()
-        
-        return {
-            'success': True,
-            'stat_name': stat_name,
-            'stat_value': stat_value
-        }
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/character/{character_id}/skill")
-async def add_character_skill(character_id: int, data: dict):
-    """Добавляет навык персонажу."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        skill_data = data.get('skill')
-        if not skill_data:
-            return {"success": False, "message": "Не указан skill"}
-        
-        character.add_skill(skill_data)
-        session.commit()
-        
-        return {
-            'success': True,
-            'skill': skill_data
-        }
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.delete("/api/character/{character_id}/skill/{skill_id}")
-async def remove_character_skill(character_id: int, skill_id: str):
-    """Удаляет навык у персонажа."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        character.remove_skill(skill_id)
-        session.commit()
-        
-        return {'success': True}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/character/{character_id}/item")
-async def add_character_item(character_id: int, data: dict):
-    """Добавляет предмет персонажу."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        item_data = data.get('item')
-        if not item_data:
-            return {"success": False, "message": "Не указан item"}
-        
-        character.add_item(item_data)
-        session.commit()
-        
-        return {
-            'success': True,
-            'item': item_data
-        }
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.delete("/api/character/{character_id}/item/{item_id}")
-async def remove_character_item(character_id: int, item_id: str):
-    """Удаляет предмет у персонажа."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        character.remove_item(item_id)
-        session.commit()
-        
-        return {'success': True}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/character/{character_id}/currency")
-async def update_character_currency(character_id: int, data: dict):
-    """Обновляет валюту персонажа."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        currency_type = data.get('currency_type')
-        amount = data.get('amount')
-        
-        if not currency_type or amount is None:
-            return {"success": False, "message": "Не указаны currency_type или amount"}
-        
-        character.set_currency(currency_type, amount)
-        session.commit()
-        
-        return {
-            'success': True,
-            'currency_type': currency_type,
-            'amount': amount
-        }
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-# ============================================================
-# 9. API: КАСТОМНЫЕ НАВЫКИ (СОЗДАЮТСЯ ГМ)
-# ============================================================
-
 @app.post("/api/skill/create")
 async def create_custom_skill(request: Request, data: dict):
-    """Создаёт кастомный навык (только для ГМ)."""
     user = get_current_user(request)
     if not user or user.role != 'gm':
         return {"success": False, "message": "Только GM может создавать навыки"}
@@ -760,195 +975,6 @@ async def create_custom_skill(request: Request, data: dict):
         return {"success": False, "message": str(e)}
     finally:
         session.close()
-
-@app.get("/api/skill/room/{room_id}")
-async def get_room_skills(room_id: int):
-    """Получает все навыки комнаты."""
-    session = Session()
-    try:
-        skills = session.query(CustomSkill).filter_by(room_id=room_id).all()
-        return {
-            'success': True,
-            'skills': [s.to_dict() for s in skills]
-        }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.delete("/api/skill/{skill_id}")
-async def delete_custom_skill(skill_id: int, request: Request):
-    """Удаляет кастомный навык."""
-    user = get_current_user(request)
-    if not user or user.role != 'gm':
-        return {"success": False, "message": "Только GM может удалять навыки"}
-    
-    session = Session()
-    try:
-        skill = session.query(CustomSkill).filter_by(id=skill_id).first()
-        if not skill:
-            return {"success": False, "message": "Навык не найден"}
-        
-        session.delete(skill)
-        session.commit()
-        
-        return {'success': True}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-# ============================================================
-# 10. ROOM MANAGER
-# ============================================================
-
-class RoomManager:
-    def __init__(self):
-        self._rooms: Dict[str, GameRoom] = {}
-
-    def create_room(self, name: str, gm_id: int, is_private: bool = False, password: str = None) -> GameRoom:
-        room_id = generate_room_id()
-        session = Session()
-        try:
-            room = GameRoom(
-                room_id=room_id,
-                name=name,
-                gm_id=gm_id,
-                is_private=is_private,
-                password_hash=hash_password(password) if password else None,
-                state='lobby'
-            )
-            session.add(room)
-            session.commit()
-            room_player = RoomPlayer(
-                room_id=room.id,
-                user_id=gm_id,
-                role='gm',
-                is_ready=True
-            )
-            session.add(room_player)
-            session.commit()
-            session.refresh(room)
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-        return room
-
-    def get_room(self, room_id: str) -> Optional[GameRoom]:
-        session = Session()
-        room = session.query(GameRoom).filter_by(room_id=room_id).first()
-        session.close()
-        return room
-
-    def get_all_rooms(self) -> List[GameRoom]:
-        session = Session()
-        rooms = session.query(GameRoom).filter(GameRoom.state != 'finished').all()
-        session.close()
-        return rooms
-
-    def get_room_players(self, room_id: str) -> List[dict]:
-        session = Session()
-        players = session.query(RoomPlayer).filter_by(room_id=room_id).all()
-        result = []
-        for p in players:
-            user = session.query(User).filter_by(id=p.user_id).first()
-            character = session.query(Character).filter_by(id=p.character_id).first() if p.character_id else None
-            result.append({
-                'user_id': p.user_id,
-                'login': user.login if user else 'Unknown',
-                'role': p.role,
-                'is_ready': p.is_ready,
-                'character_id': p.character_id,
-                'character_name': character.name if character else None
-            })
-        session.close()
-        return result
-
-room_manager = RoomManager()
-
-# ============================================================
-# 11. WEBSOCKET ДЛЯ СИНХРОНИЗАЦИИ
-# ============================================================
-
-async def broadcast_to_room(room_id: int, message: dict):
-    """Отправляет сообщение всем в комнате."""
-    for ws in connections.get(room_id, []):
-        try:
-            await ws.send_text(json.dumps(message))
-        except:
-            pass
-
-@app.websocket("/ws/character/{character_id}")
-async def character_websocket(websocket: WebSocket, character_id: int):
-    """WebSocket для синхронизации карточки персонажа."""
-    await websocket.accept()
-    
-    user = get_current_user(websocket)
-    if not user:
-        await websocket.close()
-        return
-    
-    session = Session()
-    character = session.query(Character).filter_by(id=character_id).first()
-    session.close()
-    
-    if not character:
-        await websocket.close()
-        return
-    
-    room_id = character.room_id
-    
-    if room_id not in connections:
-        connections[room_id] = []
-    connections[room_id].append(websocket)
-    
-    try:
-        while True:
-            data = await websocket.receive_text()
-            try:
-                msg = json.loads(data)
-                
-                if msg.get('type') == 'update':
-                    # Обновление карточки
-                    session = Session()
-                    character = session.query(Character).filter_by(id=character_id).first()
-                    if character:
-                        for key, value in msg.get('data', {}).items():
-                            if hasattr(character, key):
-                                setattr(character, key, value)
-                        session.commit()
-                        
-                        # Отправляем обновление всем в комнате
-                        await broadcast_to_room(room_id, {
-                            'type': 'character_updated',
-                            'character_id': character_id,
-                            'character': character.to_dict()
-                        })
-                    session.close()
-                
-                elif msg.get('type') == 'get':
-                    # Запрос текущего состояния
-                    session = Session()
-                    character = session.query(Character).filter_by(id=character_id).first()
-                    if character:
-                        await websocket.send_text(json.dumps({
-                            'type': 'character_data',
-                            'character': character.to_dict()
-                        }))
-                    session.close()
-                    
-            except json.JSONDecodeError:
-                pass
-                
-    except WebSocketDisconnect:
-        if room_id in connections:
-            if websocket in connections[room_id]:
-                connections[room_id].remove(websocket)
-            if not connections[room_id]:
-                del connections[room_id]
 
 # ============================================================
 # 12. СТРАНИЦЫ
@@ -1017,7 +1043,8 @@ async def gm_dashboard(request: Request):
     user = get_current_user(request)
     if not user or user.role != 'gm':
         return RedirectResponse(url="/login", status_code=303)
-    rooms = room_manager.get_all_rooms()
+    
+    rooms = room_manager.get_rooms_by_gm(user.id)
     return templates.TemplateResponse("gm_dashboard.html", {
         "request": request,
         "user": user,
@@ -1029,9 +1056,11 @@ async def player_dashboard(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    
     session = Session()
     player_rooms = session.query(GameRoom).join(RoomPlayer).filter(RoomPlayer.user_id == user.id).all()
     session.close()
+    
     return templates.TemplateResponse("player_dashboard.html", {
         "request": request,
         "user": user,
@@ -1065,6 +1094,9 @@ async def room_page(request: Request, room_id: str):
     tokens = session.query(GameToken).filter_by(room_id=room.id).all()
     session.close()
     
+    state_manager = room_manager.get_state_manager(room.id)
+    state = state_manager.state if state_manager else None
+    
     return templates.TemplateResponse("room.html", {
         "request": request,
         "user": user,
@@ -1072,11 +1104,104 @@ async def room_page(request: Request, room_id: str):
         "characters": characters,
         "skills": skills,
         "tokens": tokens,
-        "is_gm": room.gm_id == user.id
+        "is_gm": room.gm_id == user.id,
+        "current_state": state.value if state else None
     })
 
 # ============================================================
-# 13. ЗАПУСК
+# 13. WEBSOCKET (С ПОДДЕРЖКОЙ STATE)
+# ============================================================
+
+@app.websocket("/ws/room/{room_id}")
+async def room_websocket(websocket: WebSocket, room_id: str):
+    await websocket.accept()
+    
+    room = room_manager.get_room(room_id)
+    if not room:
+        await websocket.send_text(json.dumps({
+            'type': 'error',
+            'message': 'Комната не найдена'
+        }))
+        await websocket.close()
+        return
+    
+    user = get_current_user(websocket)  # В реальном проекте нужно передавать токен
+    
+    await manager.connect(websocket, room.id, user.id if user else 0)
+    
+    # Отправляем текущее состояние комнаты
+    state_manager = room_manager.get_state_manager(room.id)
+    if state_manager and state_manager.state:
+        await websocket.send_text(json.dumps({
+            'type': 'room_state',
+            'state': state_manager.state.value,
+            'state_name': state_manager.state.name
+        }))
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                msg_type = msg.get('type')
+                
+                if msg_type == 'chat':
+                    await manager.broadcast(room.id, {
+                        'type': 'chat',
+                        'user_id': msg.get('user_id'),
+                        'username': msg.get('username', 'Unknown'),
+                        'text': msg.get('text', ''),
+                        'timestamp': datetime.now().isoformat()
+                    })
+                
+                elif msg_type == 'move':
+                    # Проверяем, разрешено ли движение
+                    if state_manager and not state_manager.can_execute_action(ActionCategory.MOVE):
+                        await websocket.send_text(json.dumps({
+                            'type': 'error',
+                            'message': f'Движение запрещено в состоянии {state_manager.state.value}'
+                        }))
+                        continue
+                    
+                    await manager.broadcast(room.id, {
+                        'type': 'move',
+                        'token_id': msg.get('token_id'),
+                        'x': msg.get('x'),
+                        'y': msg.get('y')
+                    })
+                
+                elif msg_type == 'action':
+                    # Проверяем разрешение на действие
+                    action_str = msg.get('action_type')
+                    if action_str and state_manager:
+                        try:
+                            action = ActionCategory(action_str)
+                            user_role = 'gm' if room.gm_id == user.id else 'player'
+                            if not state_manager.can_execute_action(action, user_role):
+                                await websocket.send_text(json.dumps({
+                                    'type': 'error',
+                                    'message': f'Действие {action_str} запрещено в состоянии {state_manager.state.value}'
+                                }))
+                                continue
+                        except ValueError:
+                            pass
+                    
+                    await manager.broadcast(room.id, {
+                        'type': 'action_result',
+                        'action_type': msg.get('action_type'),
+                        'result': msg.get('result', {}),
+                        'user_id': msg.get('user_id'),
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    
+            except json.JSONDecodeError:
+                pass
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# ============================================================
+# 14. ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
