@@ -13,122 +13,12 @@ import uuid
 import random
 import math
 import re
-import asyncio
-from typing import Dict, Optional, List, Any, Set, Callable
+from typing import Dict, Optional, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
 # ============================================================
-# 1. ENUMS И КОНСТАНТЫ
-# ============================================================
-
-class EffectType(str, Enum):
-    # Боевые
-    STUNNED = "stunned"
-    BLINDED = "blinded"
-    FRIGHTENED = "frightened"
-    CHARMED = "charmed"
-    PARALYZED = "paralyzed"
-    RESTRAINED = "restrained"
-    PRONE = "prone"
-    UNCONSCIOUS = "unconscious"
-    
-    # Усиления
-    BLESS = "bless"
-    INSPIRATION = "inspiration"
-    SHIELD = "shield"
-    HASTE = "haste"
-    BARKSKIN = "barkskin"
-    HEROISM = "heroism"
-    
-    # Ослабления
-    CURSE = "curse"
-    SLOW = "slow"
-    WEAKEN = "weaken"
-    BANE = "bane"
-    
-    # Урон по времени
-    BURN = "burn"
-    BLEED = "bleed"
-    POISON = "poison"
-    ACID = "acid"
-    
-    # Лечение
-    REGENERATION = "regeneration"
-    TEMPORARY_HP = "temporary_hp"
-    
-    # Магические
-    CONCENTRATION = "concentration"
-    INVISIBLE = "invisible"
-    FLY = "fly"
-    MAGIC_SHIELD = "magic_shield"
-    
-    # Пользовательские
-    CUSTOM = "custom"
-
-class DurationType(str, Enum):
-    ONE_TURN = "one_turn"
-    MULTIPLE_TURNS = "multiple_turns"
-    UNTIL_END_OF_COMBAT = "until_end_of_combat"
-    MINUTES = "minutes"
-    HOURS = "hours"
-    UNTIL_CONDITION = "until_condition"
-    UNTIL_REMOVED = "until_removed"
-    PERMANENT = "permanent"
-
-class StackRule(str, Enum):
-    NO_STACK = "no_stack"
-    FULL_STACK = "full_stack"
-    MAX_LEVELS = "max_levels"
-    REFRESH_DURATION = "refresh_duration"
-    REPLACE_OLD = "replace_old"
-
-class ModifierType(str, Enum):
-    BONUS = "bonus"
-    PENALTY = "penalty"
-    MULTIPLIER = "multiplier"
-    FIXED = "fixed"
-    MIN = "min"
-    MAX = "max"
-
-class ModifierTarget(str, Enum):
-    # Характеристики
-    STRENGTH = "strength"
-    DEXTERITY = "dexterity"
-    CONSTITUTION = "constitution"
-    INTELLIGENCE = "intelligence"
-    WISDOM = "wisdom"
-    CHARISMA = "charisma"
-    
-    # Навыки
-    SKILL = "skill"
-    SAVING_THROW = "saving_throw"
-    
-    # Боевые
-    DAMAGE = "damage"
-    HEAL = "heal"
-    ARMOR_CLASS = "armor_class"
-    INITIATIVE = "initiative"
-    SPEED = "speed"
-    RANGE = "range"
-    
-    # Действия
-    ATTACKS = "attacks"
-    ACTIONS = "actions"
-    BONUS_ACTIONS = "bonus_actions"
-    REACTIONS = "reactions"
-    
-    # Прочие
-    CUSTOM = "custom"
-
-class EffectPriority(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-# ============================================================
-# 2. БАЗА ДАННЫХ
+# 1. БАЗА ДАННЫХ — НОВАЯ ФИЛОСОФИЯ ПЕРСОНАЖЕЙ
 # ============================================================
 
 Base = declarative_base()
@@ -143,7 +33,6 @@ class User(Base):
     password_hash = Column(String)
     role = Column(String, default='unassigned')
     created_at = Column(DateTime, default=datetime.now)
-    last_active = Column(DateTime, default=datetime.now)
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -153,55 +42,244 @@ class Settings(Base):
     theme = Column(String)
     background_image = Column(String)
 
+# ============================================================
+# 2. УНИВЕРСАЛЬНЫЙ ПЕРСОНАЖ (БЕЗ ЖЁСТКИХ ПОЛЕЙ)
+# ============================================================
+
 class Character(Base):
+    """
+    Универсальный персонаж для ЛЮБОГО сеттинга.
+    Никакой привязки к D&D или конкретной системе.
+    """
     __tablename__ = 'characters'
-    id = Column(Integer, primary_key=True)
-    name = Column(String(50), nullable=False)
-    surname = Column(String(50), default='')
-    nickname = Column(String(50), default='')
-    race = Column(String(50), default='')
-    class_name = Column(String(50), default='')
-    background = Column(String(50), default='')
-    player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     
+    # === БАЗОВАЯ ИДЕНТИФИКАЦИЯ ===
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    surname = Column(String(100), default='')
+    nickname = Column(String(100), default='')
+    
+    # === ВНЕШНИЙ ВИД ===
     portrait = Column(String(255), default='')
     token = Column(String(255), default='')
-    gender = Column(String(20), default='')
-    age = Column(Integer, default=0)
-    
-    str_base = Column(Integer, default=10)
-    str_bonus = Column(Integer, default=0)
-    dex_base = Column(Integer, default=10)
-    dex_bonus = Column(Integer, default=0)
-    con_base = Column(Integer, default=10)
-    con_bonus = Column(Integer, default=0)
-    int_base = Column(Integer, default=10)
-    int_bonus = Column(Integer, default=0)
-    wis_base = Column(Integer, default=10)
-    wis_bonus = Column(Integer, default=0)
-    cha_base = Column(Integer, default=10)
-    cha_bonus = Column(Integer, default=0)
-    
-    armor_class = Column(Integer, default=12)
-    initiative_bonus = Column(Integer, default=0)
-    speed = Column(Integer, default=30)
-    level = Column(Integer, default=1)
-    experience = Column(Integer, default=0)
-    
-    resources = Column(JSON, default='{}')
-    inventory = Column(JSON, default='[]')
-    equipment = Column(JSON, default='{}')
-    effects = Column(JSON, default='[]')
-    skills = Column(JSON, default='[]')
-    
     description = Column(Text, default='')
     biography = Column(Text, default='')
-    is_npc = Column(Boolean, default=False)
     
+    # === ГИБКИЕ ПОЛЯ (ПРОСТО СТРОКИ) ===
+    class_name = Column(String(100), default='')  # Любой класс: Воин, Репортёр, Инквизитор
+    race = Column(String(100), default='')        # Любая раса: Человек, Вампир, Киборг
+    background = Column(String(100), default='')  # Любой бэкграунд
+    alignment = Column(String(50), default='')    # Любое мировоззрение
+    
+    # === БАЗОВЫЕ БОЕВЫЕ ПАРАМЕТРЫ (ОПЦИОНАЛЬНО) ===
+    armor_class = Column(Integer, default=10)
+    speed = Column(Integer, default=30)
+    max_hp = Column(Integer, default=20)
+    current_hp = Column(Integer, default=20)
+    temporary_hp = Column(Integer, default=0)
+    
+    # === ВАЛЮТА (ГИБКАЯ) ===
+    currency = Column(JSON, default='{}')  # {"gold": 100, "credits": 50, "pounds": 10}
+    
+    # === ДИНАМИЧЕСКИЕ ХАРАКТЕРИСТИКИ ===
+    stats = Column(JSON, default='{}')
+    # {"strength": 10, "dexterity": 14, "constitution": 12,
+    #  "influence": 8, "fear": 5, "will": 10}
+    
+    # === ДИНАМИЧЕСКИЕ НАВЫКИ ===
+    skills = Column(JSON, default='[]')
+    # [{"id": "skill_1", "name": "Взлом", "value": 12},
+    #  {"id": "skill_2", "name": "Убеждение", "value": 8}]
+    
+    # === ИНВЕНТАРЬ (ПОЛНОСТЬЮ РУЧНОЙ) ===
+    inventory = Column(JSON, default='[]')
+    # [{"id": "item_1", "name": "Меч", "quantity": 1, "description": "Ржавый меч"},
+    #  {"id": "item_2", "name": "Улика", "quantity": 1, "description": "Кровавый отпечаток"}]
+    
+    # === ЭКИПИРОВКА ===
+    equipment = Column(JSON, default='{}')
+    # {"main_hand": null, "off_hand": null, "armor": null}
+    
+    # === ЭФФЕКТЫ ===
+    effects = Column(JSON, default='[]')
+    
+    # === МЕТАДАННЫЕ ===
+    player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    room_id = Column(Integer, ForeignKey('game_rooms.id'), nullable=True)
+    is_npc = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
+    
+    # === СВЯЗИ ===
     owner = relationship("User", foreign_keys=[created_by])
+    player = relationship("User", foreign_keys=[player_id])
+    
+    def to_dict(self) -> dict:
+        """Преобразует персонажа в словарь для API."""
+        return {
+            'id': self.id,
+            'name': self.name,
+            'surname': self.surname,
+            'nickname': self.nickname,
+            'portrait': self.portrait,
+            'token': self.token,
+            'description': self.description,
+            'biography': self.biography,
+            'class': self.class_name,
+            'race': self.race,
+            'background': self.background,
+            'alignment': self.alignment,
+            'armor_class': self.armor_class,
+            'speed': self.speed,
+            'max_hp': self.max_hp,
+            'current_hp': self.current_hp,
+            'temporary_hp': self.temporary_hp,
+            'currency': json.loads(self.currency) if self.currency else {},
+            'stats': json.loads(self.stats) if self.stats else {},
+            'skills': json.loads(self.skills) if self.skills else [],
+            'inventory': json.loads(self.inventory) if self.inventory else [],
+            'equipment': json.loads(self.equipment) if self.equipment else {},
+            'effects': json.loads(self.effects) if self.effects else [],
+            'is_npc': self.is_npc,
+            'player_id': self.player_id,
+            'room_id': self.room_id
+        }
+    
+    def get_stat(self, stat_name: str) -> int:
+        """Получает значение характеристики по имени."""
+        stats = json.loads(self.stats) if self.stats else {}
+        return stats.get(stat_name, 10)
+    
+    def set_stat(self, stat_name: str, value: int):
+        """Устанавливает значение характеристики."""
+        stats = json.loads(self.stats) if self.stats else {}
+        stats[stat_name] = value
+        self.stats = json.dumps(stats)
+    
+    def get_skill(self, skill_name: str) -> Optional[dict]:
+        """Получает навык по имени."""
+        skills = json.loads(self.skills) if self.skills else []
+        for skill in skills:
+            if skill.get('name') == skill_name:
+                return skill
+        return None
+    
+    def add_skill(self, skill_data: dict):
+        """Добавляет навык."""
+        skills = json.loads(self.skills) if self.skills else []
+        skills.append(skill_data)
+        self.skills = json.dumps(skills)
+    
+    def remove_skill(self, skill_id: str):
+        """Удаляет навык."""
+        skills = json.loads(self.skills) if self.skills else []
+        skills = [s for s in skills if s.get('id') != skill_id]
+        self.skills = json.dumps(skills)
+    
+    def add_item(self, item_data: dict):
+        """Добавляет предмет в инвентарь."""
+        inventory = json.loads(self.inventory) if self.inventory else []
+        inventory.append(item_data)
+        self.inventory = json.dumps(inventory)
+    
+    def remove_item(self, item_id: str):
+        """Удаляет предмет из инвентаря."""
+        inventory = json.loads(self.inventory) if self.inventory else []
+        inventory = [i for i in inventory if i.get('id') != item_id]
+        self.inventory = json.dumps(inventory)
+    
+    def get_currency(self, currency_type: str) -> int:
+        """Получает количество валюты определённого типа."""
+        currency = json.loads(self.currency) if self.currency else {}
+        return currency.get(currency_type, 0)
+    
+    def set_currency(self, currency_type: str, amount: int):
+        """Устанавливает количество валюты."""
+        currency = json.loads(self.currency) if self.currency else {}
+        currency[currency_type] = amount
+        self.currency = json.dumps(currency)
+    
+    def add_currency(self, currency_type: str, amount: int):
+        """Добавляет валюту."""
+        current = self.get_currency(currency_type)
+        self.set_currency(currency_type, current + amount)
+    
+    def remove_currency(self, currency_type: str, amount: int) -> bool:
+        """Удаляет валюту. Возвращает True, если достаточно."""
+        current = self.get_currency(currency_type)
+        if current < amount:
+            return False
+        self.set_currency(currency_type, current - amount)
+        return True
+    
+    def add_effect(self, effect_data: dict):
+        """Добавляет эффект."""
+        effects = json.loads(self.effects) if self.effects else []
+        effects.append(effect_data)
+        self.effects = json.dumps(effects)
+    
+    def remove_effect(self, effect_id: str):
+        """Удаляет эффект."""
+        effects = json.loads(self.effects) if self.effects else []
+        effects = [e for e in effects if e.get('id') != effect_id]
+        self.effects = json.dumps(effects)
+
+# ============================================================
+# 3. КАСТОМНЫЕ НАВЫКИ (СОЗДАЮТСЯ ГМ)
+# ============================================================
+
+class CustomSkill(Base):
+    """Навык, созданный ГМ. Не привязан к системе."""
+    __tablename__ = 'custom_skills'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    icon = Column(String(255), default='')
+    description = Column(Text, default='')
+    
+    # Механики навыка
+    dice_formula = Column(String(50), default='1d20')  # Например: 1d20, 2d6, 1d100
+    damage_formula = Column(String(50), default='')    # Например: 1d8+3
+    saving_throw = Column(String(50), default='')      # Например: dex, con, will
+    target_type = Column(String(50), default='single') # single, area, self
+    
+    # Стоимость и перезарядка
+    cost_type = Column(String(50), default='action')   # action, bonus, reaction, free
+    cost_value = Column(Integer, default=1)
+    cooldown = Column(Integer, default=0)
+    
+    # Эффекты
+    effects = Column(JSON, default='[]')
+    
+    # Визуал
+    animation = Column(String(100), default='')
+    
+    # Метаданные
+    created_by = Column(Integer, ForeignKey('users.id'))
+    room_id = Column(Integer, ForeignKey('game_rooms.id'))
+    created_at = Column(DateTime, default=datetime.now)
+    
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'icon': self.icon,
+            'description': self.description,
+            'dice_formula': self.dice_formula,
+            'damage_formula': self.damage_formula,
+            'saving_throw': self.saving_throw,
+            'target_type': self.target_type,
+            'cost_type': self.cost_type,
+            'cost_value': self.cost_value,
+            'cooldown': self.cooldown,
+            'effects': json.loads(self.effects) if self.effects else [],
+            'animation': self.animation
+        }
+
+# ============================================================
+# 4. ИГРОВЫЕ КОМНАТЫ
+# ============================================================
 
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
@@ -215,17 +293,13 @@ class GameRoom(Base):
     is_private = Column(Boolean, default=False)
     current_map = Column(String(255), default='')
     current_scene = Column(String(100), default='')
-    current_round = Column(Integer, default=0)
-    current_turn = Column(Integer, default=0)
-    current_player_id = Column(Integer, nullable=True)
-    initiative_order = Column(JSON, default='[]')
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     gm = relationship("User", foreign_keys=[gm_id])
     tokens = relationship("GameToken", backref="room")
     players = relationship("RoomPlayer", backref="room", cascade="all, delete-orphan")
-    action_logs = relationship("ActionLog", backref="room", cascade="all, delete-orphan")
+    custom_skills = relationship("CustomSkill", backref="room", cascade="all, delete-orphan")
 
 class RoomPlayer(Base):
     __tablename__ = 'room_players'
@@ -252,9 +326,6 @@ class GameToken(Base):
     y = Column(Float, default=0)
     is_visible = Column(Boolean, default=True)
     layer = Column(String, default='common')
-    hp = Column(Integer, default=20)
-    max_hp = Column(Integer, default=20)
-    ac = Column(Integer, default=12)
     description = Column(String, default='')
     created_at = Column(DateTime, default=datetime.now)
     character = relationship("Character", foreign_keys=[character_id])
@@ -279,381 +350,6 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. СИСТЕМА ЭФФЕКТОВ
-# ============================================================
-
-@dataclass
-class EffectModifier:
-    """Модификатор, применяемый эффектом."""
-    target: ModifierTarget
-    modifier_type: ModifierType
-    value: float
-    description: str = ''
-    
-    def apply(self, base_value: float) -> float:
-        """Применяет модификатор к базовому значению."""
-        if self.modifier_type == ModifierType.BONUS:
-            return base_value + self.value
-        elif self.modifier_type == ModifierType.PENALTY:
-            return base_value - self.value
-        elif self.modifier_type == ModifierType.MULTIPLIER:
-            return base_value * self.value
-        elif self.modifier_type == ModifierType.FIXED:
-            return self.value
-        elif self.modifier_type == ModifierType.MIN:
-            return max(base_value, self.value)
-        elif self.modifier_type == ModifierType.MAX:
-            return min(base_value, self.value)
-        return base_value
-    
-    def to_dict(self) -> dict:
-        return {
-            'target': self.target.value,
-            'modifier_type': self.modifier_type.value,
-            'value': self.value,
-            'description': self.description
-        }
-
-@dataclass
-class GameEffect:
-    """Игровой эффект."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ''
-    description: str = ''
-    effect_type: EffectType = EffectType.CUSTOM
-    icon: str = ''
-    visual_effect: str = ''
-    
-    # Источник
-    source: str = ''
-    source_type: str = ''  # spell, item, ability, trap, gm
-    
-    # Владелец
-    owner_id: int = 0
-    owner_name: str = ''
-    
-    # Длительность
-    duration_type: DurationType = DurationType.UNTIL_REMOVED
-    duration_value: int = 0
-    remaining_turns: int = 0
-    remaining_minutes: int = 0
-    remaining_hours: int = 0
-    is_active: bool = True
-    
-    # Стек
-    stack_rule: StackRule = StackRule.NO_STACK
-    max_stacks: int = 1
-    current_stacks: int = 1
-    
-    # Приоритет
-    priority: EffectPriority = EffectPriority.MEDIUM
-    
-    # Модификаторы
-    modifiers: List[EffectModifier] = field(default_factory=list)
-    
-    # Условия снятия
-    removal_condition: str = ''
-    is_concentration: bool = False
-    concentration_save_dc: int = 10
-    
-    # Визуальные данные
-    color: str = '#ff6b6b'
-    animation: str = ''
-    sound: str = ''
-    
-    def apply_modifiers(self, target: ModifierTarget, base_value: float) -> float:
-        """Применяет все модификаторы для цели."""
-        result = base_value
-        for modifier in self.modifiers:
-            if modifier.target == target:
-                result = modifier.apply(result)
-        return result
-    
-    def tick(self) -> bool:
-        """Обновляет длительность эффекта. Возвращает True, если эффект истёк."""
-        if not self.is_active:
-            return True
-        
-        if self.duration_type == DurationType.ONE_TURN:
-            self.remaining_turns -= 1
-        elif self.duration_type == DurationType.MULTIPLE_TURNS:
-            self.remaining_turns -= 1
-        elif self.duration_type == DurationType.MINUTES:
-            self.remaining_minutes -= 1
-        elif self.duration_type == DurationType.HOURS:
-            self.remaining_hours -= 1
-        
-        # Проверяем истечение
-        if self._is_expired():
-            self.is_active = False
-            return True
-        
-        return False
-    
-    def _is_expired(self) -> bool:
-        """Проверяет, истёк ли эффект."""
-        if self.duration_type == DurationType.UNTIL_REMOVED:
-            return False
-        if self.duration_type == DurationType.PERMANENT:
-            return False
-        if self.duration_type == DurationType.UNTIL_END_OF_COMBAT:
-            return False
-        if self.duration_type == DurationType.ONE_TURN:
-            return self.remaining_turns <= 0
-        if self.duration_type == DurationType.MULTIPLE_TURNS:
-            return self.remaining_turns <= 0
-        if self.duration_type == DurationType.MINUTES:
-            return self.remaining_minutes <= 0
-        if self.duration_type == DurationType.HOURS:
-            return self.remaining_hours <= 0
-        if self.duration_type == DurationType.UNTIL_CONDITION:
-            return False  # Проверяется отдельно
-        return True
-    
-    def stack_with(self, other: 'GameEffect') -> 'GameEffect':
-        """Объединяет эффекты при накоплении."""
-        if self.stack_rule == StackRule.NO_STACK:
-            return self if self.current_stacks >= other.current_stacks else other
-        elif self.stack_rule == StackRule.FULL_STACK:
-            self.current_stacks += other.current_stacks
-            return self
-        elif self.stack_rule == StackRule.MAX_LEVELS:
-            self.current_stacks = min(self.current_stacks + other.current_stacks, self.max_stacks)
-            return self
-        elif self.stack_rule == StackRule.REFRESH_DURATION:
-            self.remaining_turns = max(self.remaining_turns, other.remaining_turns)
-            self.current_stacks += other.current_stacks
-            return self
-        elif self.stack_rule == StackRule.REPLACE_OLD:
-            return other
-        return self
-    
-    def to_dict(self) -> dict:
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'effect_type': self.effect_type.value,
-            'icon': self.icon,
-            'visual_effect': self.visual_effect,
-            'source': self.source,
-            'source_type': self.source_type,
-            'owner_id': self.owner_id,
-            'owner_name': self.owner_name,
-            'duration_type': self.duration_type.value,
-            'duration_value': self.duration_value,
-            'remaining_turns': self.remaining_turns,
-            'remaining_minutes': self.remaining_minutes,
-            'remaining_hours': self.remaining_hours,
-            'is_active': self.is_active,
-            'stack_rule': self.stack_rule.value,
-            'max_stacks': self.max_stacks,
-            'current_stacks': self.current_stacks,
-            'priority': self.priority.value,
-            'modifiers': [m.to_dict() for m in self.modifiers],
-            'removal_condition': self.removal_condition,
-            'is_concentration': self.is_concentration,
-            'concentration_save_dc': self.concentration_save_dc,
-            'color': self.color,
-            'animation': self.animation,
-            'sound': self.sound
-        }
-
-# ============================================================
-# 4. EFFECT MANAGER
-# ============================================================
-
-class EffectManager:
-    """Управляет эффектами персонажей."""
-    
-    def __init__(self):
-        self._effects: Dict[str, GameEffect] = {}  # id -> GameEffect
-        self._character_effects: Dict[int, List[str]] = {}  # character_id -> [effect_ids]
-        self._concentration_effects: Dict[int, str] = {}  # character_id -> effect_id
-    
-    def create_effect(self, effect_data: dict) -> GameEffect:
-        """Создаёт новый эффект."""
-        effect = GameEffect(
-            name=effect_data.get('name', 'Неизвестный эффект'),
-            description=effect_data.get('description', ''),
-            effect_type=EffectType(effect_data.get('effect_type', 'custom')),
-            icon=effect_data.get('icon', ''),
-            visual_effect=effect_data.get('visual_effect', ''),
-            source=effect_data.get('source', ''),
-            source_type=effect_data.get('source_type', ''),
-            owner_id=effect_data.get('owner_id', 0),
-            owner_name=effect_data.get('owner_name', ''),
-            duration_type=DurationType(effect_data.get('duration_type', 'until_removed')),
-            duration_value=effect_data.get('duration_value', 0),
-            remaining_turns=effect_data.get('remaining_turns', 0),
-            remaining_minutes=effect_data.get('remaining_minutes', 0),
-            remaining_hours=effect_data.get('remaining_hours', 0),
-            stack_rule=StackRule(effect_data.get('stack_rule', 'no_stack')),
-            max_stacks=effect_data.get('max_stacks', 1),
-            current_stacks=effect_data.get('current_stacks', 1),
-            priority=EffectPriority(effect_data.get('priority', 'medium')),
-            removal_condition=effect_data.get('removal_condition', ''),
-            is_concentration=effect_data.get('is_concentration', False),
-            concentration_save_dc=effect_data.get('concentration_save_dc', 10),
-            color=effect_data.get('color', '#ff6b6b'),
-            animation=effect_data.get('animation', ''),
-            sound=effect_data.get('sound', '')
-        )
-        
-        # Добавляем модификаторы
-        for mod_data in effect_data.get('modifiers', []):
-            modifier = EffectModifier(
-                target=ModifierTarget(mod_data.get('target', 'custom')),
-                modifier_type=ModifierType(mod_data.get('modifier_type', 'bonus')),
-                value=mod_data.get('value', 0),
-                description=mod_data.get('description', '')
-            )
-            effect.modifiers.append(modifier)
-        
-        self._effects[effect.id] = effect
-        
-        # Добавляем персонажу
-        if effect.owner_id:
-            if effect.owner_id not in self._character_effects:
-                self._character_effects[effect.owner_id] = []
-            self._character_effects[effect.owner_id].append(effect.id)
-            
-            # Концентрация
-            if effect.is_concentration:
-                self._concentration_effects[effect.owner_id] = effect.id
-        
-        return effect
-    
-    def add_effect_to_character(self, character_id: int, effect: GameEffect) -> bool:
-        """Добавляет эффект персонажу."""
-        if character_id not in self._character_effects:
-            self._character_effects[character_id] = []
-        
-        # Проверяем, есть ли уже такой эффект
-        for existing_id in self._character_effects[character_id]:
-            existing = self._effects.get(existing_id)
-            if existing and existing.name == effect.name:
-                # Применяем правила стека
-                merged = existing.stack_with(effect)
-                self._effects[existing.id] = merged
-                return True
-        
-        # Добавляем новый эффект
-        effect.owner_id = character_id
-        self._effects[effect.id] = effect
-        self._character_effects[character_id].append(effect.id)
-        
-        # Концентрация
-        if effect.is_concentration:
-            # Снимаем старую концентрацию
-            if character_id in self._concentration_effects:
-                old_id = self._concentration_effects[character_id]
-                old_effect = self._effects.get(old_id)
-                if old_effect:
-                    old_effect.is_active = False
-            self._concentration_effects[character_id] = effect.id
-        
-        return True
-    
-    def remove_effect(self, effect_id: str, character_id: int = None) -> bool:
-        """Удаляет эффект."""
-        effect = self._effects.get(effect_id)
-        if not effect:
-            return False
-        
-        effect.is_active = False
-        
-        # Удаляем из списка персонажа
-        if character_id and character_id in self._character_effects:
-            if effect_id in self._character_effects[character_id]:
-                self._character_effects[character_id].remove(effect_id)
-        
-        # Проверяем концентрацию
-        if effect.is_concentration and effect.owner_id in self._concentration_effects:
-            if self._concentration_effects[effect.owner_id] == effect_id:
-                del self._concentration_effects[effect.owner_id]
-        
-        return True
-    
-    def get_character_effects(self, character_id: int) -> List[GameEffect]:
-        """Возвращает все активные эффекты персонажа."""
-        result = []
-        if character_id not in self._character_effects:
-            return result
-        
-        for effect_id in self._character_effects[character_id]:
-            effect = self._effects.get(effect_id)
-            if effect and effect.is_active:
-                result.append(effect)
-        
-        return sorted(result, key=lambda e: e.priority.value)
-    
-    def get_active_effect_by_type(self, character_id: int, effect_type: EffectType) -> Optional[GameEffect]:
-        """Возвращает активный эффект по типу."""
-        for effect in self.get_character_effects(character_id):
-            if effect.effect_type == effect_type and effect.is_active:
-                return effect
-        return None
-    
-    def apply_modifiers(self, character_id: int, target: ModifierTarget, base_value: float) -> float:
-        """Применяет все модификаторы эффектов к значению."""
-        result = base_value
-        for effect in self.get_character_effects(character_id):
-            if effect.is_active:
-                result = effect.apply_modifiers(target, result)
-        return result
-    
-    def tick_effects(self, character_id: int):
-        """Обновляет длительность эффектов персонажа."""
-        if character_id not in self._character_effects:
-            return
-        
-        expired = []
-        for effect_id in self._character_effects[character_id]:
-            effect = self._effects.get(effect_id)
-            if effect and effect.is_active:
-                if effect.tick():
-                    expired.append(effect_id)
-        
-        for effect_id in expired:
-            self.remove_effect(effect_id, character_id)
-    
-    def check_concentration(self, character_id: int, damage: int) -> bool:
-        """Проверяет концентрацию после получения урона."""
-        if character_id not in self._concentration_effects:
-            return True
-        
-        effect_id = self._concentration_effects[character_id]
-        effect = self._effects.get(effect_id)
-        if not effect or not effect.is_active:
-            return True
-        
-        # Бросок спасброска
-        dc = max(10, damage // 2)
-        roll = random.randint(1, 20)
-        
-        # Модификатор спасброска (CON)
-        # TODO: Получить из Character
-        con_save = 0
-        
-        if roll + con_save >= dc:
-            return True  # Концентрация сохранена
-        
-        # Концентрация потеряна
-        effect.is_active = False
-        self.remove_effect(effect_id, character_id)
-        return False
-    
-    def get_concentration_effect(self, character_id: int) -> Optional[GameEffect]:
-        """Возвращает эффект концентрации персонажа."""
-        if character_id not in self._concentration_effects:
-            return None
-        effect_id = self._concentration_effects[character_id]
-        return self._effects.get(effect_id)
-
-effect_manager = EffectManager()
-
-# ============================================================
 # 5. МИГРАЦИЯ
 # ============================================================
 
@@ -666,6 +362,10 @@ def migrate_database():
             print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
+        if 'custom_skills' not in inspector.get_table_names():
+            print("🔄 Создаём таблицу Custom Skills...")
+            Base.metadata.create_all(engine)
+            print("✅ Таблица навыков создана!")
         if 'action_logs' not in inspector.get_table_names():
             print("🔄 Создаём таблицу Action Logs...")
             Base.metadata.create_all(engine)
@@ -690,6 +390,8 @@ AVATAR_DIR = "static/avatars"
 MAP_DIR = "static/maps"
 os.makedirs(AVATAR_DIR, exist_ok=True)
 os.makedirs(MAP_DIR, exist_ok=True)
+
+connections = {}
 
 # ============================================================
 # 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -738,144 +440,643 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 8. API: ЭФФЕКТЫ
+# 8. API: ПЕРСОНАЖИ (НОВАЯ ФИЛОСОФИЯ)
 # ============================================================
 
-@app.post("/api/effect/create")
-async def create_effect(request: Request, data: dict):
-    """Создаёт новый эффект."""
+@app.post("/api/character/create")
+async def create_character(request: Request, data: dict):
+    """Создаёт персонажа для ЛЮБОГО сеттинга."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    effect = effect_manager.create_effect(data)
-    return {
-        'success': True,
-        'effect': effect.to_dict()
-    }
+    session = Session()
+    try:
+        character = Character(
+            name=data.get('name', 'Новый персонаж'),
+            surname=data.get('surname', ''),
+            nickname=data.get('nickname', ''),
+            portrait=data.get('portrait', ''),
+            token=data.get('token', ''),
+            description=data.get('description', ''),
+            biography=data.get('biography', ''),
+            class_name=data.get('class', ''),
+            race=data.get('race', ''),
+            background=data.get('background', ''),
+            alignment=data.get('alignment', ''),
+            armor_class=data.get('armor_class', 10),
+            speed=data.get('speed', 30),
+            max_hp=data.get('max_hp', 20),
+            current_hp=data.get('current_hp', 20),
+            temporary_hp=data.get('temporary_hp', 0),
+            player_id=user.id,
+            room_id=data.get('room_id'),
+            is_npc=data.get('is_npc', False),
+            created_by=user.id
+        )
+        
+        # Инициализируем пустые JSON поля
+        character.stats = json.dumps(data.get('stats', {}))
+        character.skills = json.dumps(data.get('skills', []))
+        character.inventory = json.dumps(data.get('inventory', []))
+        character.equipment = json.dumps(data.get('equipment', {}))
+        character.effects = json.dumps(data.get('effects', []))
+        character.currency = json.dumps(data.get('currency', {}))
+        
+        session.add(character)
+        session.commit()
+        
+        return {
+            'success': True,
+            'character_id': character.id,
+            'character': character.to_dict()
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
-@app.post("/api/effect/apply")
-async def apply_effect(request: Request, data: dict):
-    """Применяет эффект к персонажу."""
+@app.get("/api/character/{character_id}")
+async def get_character(character_id: int):
+    """Получает персонажа."""
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        return {'success': True, 'character': character.to_dict()}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.put("/api/character/{character_id}")
+async def update_character(character_id: int, data: dict):
+    """Обновляет персонажа (любые поля)."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    character_id = data.get('character_id')
-    effect_data = data.get('effect')
-    
-    if not character_id or not effect_data:
-        return {"success": False, "message": "Не указаны character_id или effect"}
-    
-    # Создаём эффект
-    effect_data['owner_id'] = character_id
-    effect = effect_manager.create_effect(effect_data)
-    
-    # Добавляем персонажу
-    success = effect_manager.add_effect_to_character(character_id, effect)
-    
-    if not success:
-        return {"success": False, "message": "Не удалось применить эффект"}
-    
-    return {
-        'success': True,
-        'effect': effect.to_dict()
-    }
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        # Обновляем все переданные поля
+        for key, value in data.items():
+            if hasattr(character, key):
+                setattr(character, key, value)
+        
+        session.commit()
+        
+        # Уведомляем через WebSocket
+        if character.room_id:
+            await broadcast_to_room(character.room_id, {
+                'type': 'character_update',
+                'character_id': character.id,
+                'character': character.to_dict()
+            })
+        
+        return {'success': True, 'character': character.to_dict()}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
-@app.post("/api/effect/remove")
-async def remove_effect(request: Request, data: dict):
-    """Удаляет эффект с персонажа."""
+@app.post("/api/character/{character_id}/stat")
+async def update_character_stat(character_id: int, data: dict):
+    """Обновляет конкретную характеристику."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    effect_id = data.get('effect_id')
-    character_id = data.get('character_id')
-    
-    if not effect_id:
-        return {"success": False, "message": "Не указан effect_id"}
-    
-    success = effect_manager.remove_effect(effect_id, character_id)
-    
-    return {
-        'success': success,
-        'message': 'Эффект удалён' if success else 'Эффект не найден'
-    }
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        stat_name = data.get('stat_name')
+        stat_value = data.get('stat_value')
+        
+        if not stat_name or stat_value is None:
+            return {"success": False, "message": "Не указаны stat_name или stat_value"}
+        
+        character.set_stat(stat_name, stat_value)
+        session.commit()
+        
+        return {
+            'success': True,
+            'stat_name': stat_name,
+            'stat_value': stat_value
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
-@app.get("/api/effect/character/{character_id}")
-async def get_character_effects(character_id: int):
-    """Возвращает все эффекты персонажа."""
-    effects = effect_manager.get_character_effects(character_id)
-    return {
-        'success': True,
-        'effects': [e.to_dict() for e in effects]
-    }
-
-@app.get("/api/effect/types")
-async def get_effect_types():
-    """Возвращает все типы эффектов."""
-    return {
-        'success': True,
-        'types': [
-            {'value': t.value, 'label': t.value.replace('_', ' ').title()}
-            for t in EffectType
-        ]
-    }
-
-@app.get("/api/effect/duration_types")
-async def get_duration_types():
-    """Возвращает все типы длительности."""
-    return {
-        'success': True,
-        'types': [
-            {'value': t.value, 'label': t.value.replace('_', ' ').title()}
-            for t in DurationType
-        ]
-    }
-
-@app.get("/api/effect/stack_rules")
-async def get_stack_rules():
-    """Возвращает все правила стека."""
-    return {
-        'success': True,
-        'rules': [
-            {'value': t.value, 'label': t.value.replace('_', ' ').title()}
-            for t in StackRule
-        ]
-    }
-
-@app.post("/api/effect/tick")
-async def tick_effects(request: Request, data: dict):
-    """Обновляет длительность эффектов персонажа."""
+@app.post("/api/character/{character_id}/skill")
+async def add_character_skill(character_id: int, data: dict):
+    """Добавляет навык персонажу."""
     user = get_current_user(request)
     if not user:
         return {"success": False, "message": "Не авторизован"}
     
-    character_id = data.get('character_id')
-    if not character_id:
-        return {"success": False, "message": "Не указан character_id"}
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        skill_data = data.get('skill')
+        if not skill_data:
+            return {"success": False, "message": "Не указан skill"}
+        
+        character.add_skill(skill_data)
+        session.commit()
+        
+        return {
+            'success': True,
+            'skill': skill_data
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.delete("/api/character/{character_id}/skill/{skill_id}")
+async def remove_character_skill(character_id: int, skill_id: str):
+    """Удаляет навык у персонажа."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
     
-    effect_manager.tick_effects(character_id)
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        character.remove_skill(skill_id)
+        session.commit()
+        
+        return {'success': True}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.post("/api/character/{character_id}/item")
+async def add_character_item(character_id: int, data: dict):
+    """Добавляет предмет персонажу."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
     
-    return {'success': True, 'message': 'Эффекты обновлены'}
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        item_data = data.get('item')
+        if not item_data:
+            return {"success": False, "message": "Не указан item"}
+        
+        character.add_item(item_data)
+        session.commit()
+        
+        return {
+            'success': True,
+            'item': item_data
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.delete("/api/character/{character_id}/item/{item_id}")
+async def remove_character_item(character_id: int, item_id: str):
+    """Удаляет предмет у персонажа."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        character.remove_item(item_id)
+        session.commit()
+        
+        return {'success': True}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.post("/api/character/{character_id}/currency")
+async def update_character_currency(character_id: int, data: dict):
+    """Обновляет валюту персонажа."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    session = Session()
+    try:
+        character = session.query(Character).filter_by(id=character_id).first()
+        if not character:
+            return {"success": False, "message": "Персонаж не найден"}
+        
+        currency_type = data.get('currency_type')
+        amount = data.get('amount')
+        
+        if not currency_type or amount is None:
+            return {"success": False, "message": "Не указаны currency_type или amount"}
+        
+        character.set_currency(currency_type, amount)
+        session.commit()
+        
+        return {
+            'success': True,
+            'currency_type': currency_type,
+            'amount': amount
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
 # ============================================================
-# 9. ДАЛЬШЕ ИДУТ ОСТАЛЬНЫЕ КОМПОНЕНТЫ (СОКРАЩЕНО ДЛЯ ОТВЕТА)
+# 9. API: КАСТОМНЫЕ НАВЫКИ (СОЗДАЮТСЯ ГМ)
 # ============================================================
 
-# Для полноты картины, здесь должны быть:
-# - Character Runtime
-# - Connection Manager
-# - Room Manager
-# - Action Manager
-# - Dice System
-# - Все страницы и API
+@app.post("/api/skill/create")
+async def create_custom_skill(request: Request, data: dict):
+    """Создаёт кастомный навык (только для ГМ)."""
+    user = get_current_user(request)
+    if not user or user.role != 'gm':
+        return {"success": False, "message": "Только GM может создавать навыки"}
+    
+    session = Session()
+    try:
+        skill = CustomSkill(
+            name=data.get('name', 'Новый навык'),
+            icon=data.get('icon', ''),
+            description=data.get('description', ''),
+            dice_formula=data.get('dice_formula', '1d20'),
+            damage_formula=data.get('damage_formula', ''),
+            saving_throw=data.get('saving_throw', ''),
+            target_type=data.get('target_type', 'single'),
+            cost_type=data.get('cost_type', 'action'),
+            cost_value=data.get('cost_value', 1),
+            cooldown=data.get('cooldown', 0),
+            animation=data.get('animation', ''),
+            created_by=user.id,
+            room_id=data.get('room_id')
+        )
+        skill.effects = json.dumps(data.get('effects', []))
+        
+        session.add(skill)
+        session.commit()
+        
+        return {
+            'success': True,
+            'skill': skill.to_dict()
+        }
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
-# Но чтобы не раздувать ответ, я показываю только ключевые компоненты.
-# Полная версия доступна по запросу.
+@app.get("/api/skill/room/{room_id}")
+async def get_room_skills(room_id: int):
+    """Получает все навыки комнаты."""
+    session = Session()
+    try:
+        skills = session.query(CustomSkill).filter_by(room_id=room_id).all()
+        return {
+            'success': True,
+            'skills': [s.to_dict() for s in skills]
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
+
+@app.delete("/api/skill/{skill_id}")
+async def delete_custom_skill(skill_id: int, request: Request):
+    """Удаляет кастомный навык."""
+    user = get_current_user(request)
+    if not user or user.role != 'gm':
+        return {"success": False, "message": "Только GM может удалять навыки"}
+    
+    session = Session()
+    try:
+        skill = session.query(CustomSkill).filter_by(id=skill_id).first()
+        if not skill:
+            return {"success": False, "message": "Навык не найден"}
+        
+        session.delete(skill)
+        session.commit()
+        
+        return {'success': True}
+    except Exception as e:
+        session.rollback()
+        return {"success": False, "message": str(e)}
+    finally:
+        session.close()
 
 # ============================================================
-# 10. ЗАПУСК
+# 10. ROOM MANAGER
+# ============================================================
+
+class RoomManager:
+    def __init__(self):
+        self._rooms: Dict[str, GameRoom] = {}
+
+    def create_room(self, name: str, gm_id: int, is_private: bool = False, password: str = None) -> GameRoom:
+        room_id = generate_room_id()
+        session = Session()
+        try:
+            room = GameRoom(
+                room_id=room_id,
+                name=name,
+                gm_id=gm_id,
+                is_private=is_private,
+                password_hash=hash_password(password) if password else None,
+                state='lobby'
+            )
+            session.add(room)
+            session.commit()
+            room_player = RoomPlayer(
+                room_id=room.id,
+                user_id=gm_id,
+                role='gm',
+                is_ready=True
+            )
+            session.add(room_player)
+            session.commit()
+            session.refresh(room)
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+        return room
+
+    def get_room(self, room_id: str) -> Optional[GameRoom]:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        session.close()
+        return room
+
+    def get_all_rooms(self) -> List[GameRoom]:
+        session = Session()
+        rooms = session.query(GameRoom).filter(GameRoom.state != 'finished').all()
+        session.close()
+        return rooms
+
+    def get_room_players(self, room_id: str) -> List[dict]:
+        session = Session()
+        players = session.query(RoomPlayer).filter_by(room_id=room_id).all()
+        result = []
+        for p in players:
+            user = session.query(User).filter_by(id=p.user_id).first()
+            character = session.query(Character).filter_by(id=p.character_id).first() if p.character_id else None
+            result.append({
+                'user_id': p.user_id,
+                'login': user.login if user else 'Unknown',
+                'role': p.role,
+                'is_ready': p.is_ready,
+                'character_id': p.character_id,
+                'character_name': character.name if character else None
+            })
+        session.close()
+        return result
+
+room_manager = RoomManager()
+
+# ============================================================
+# 11. WEBSOCKET ДЛЯ СИНХРОНИЗАЦИИ
+# ============================================================
+
+async def broadcast_to_room(room_id: int, message: dict):
+    """Отправляет сообщение всем в комнате."""
+    for ws in connections.get(room_id, []):
+        try:
+            await ws.send_text(json.dumps(message))
+        except:
+            pass
+
+@app.websocket("/ws/character/{character_id}")
+async def character_websocket(websocket: WebSocket, character_id: int):
+    """WebSocket для синхронизации карточки персонажа."""
+    await websocket.accept()
+    
+    user = get_current_user(websocket)
+    if not user:
+        await websocket.close()
+        return
+    
+    session = Session()
+    character = session.query(Character).filter_by(id=character_id).first()
+    session.close()
+    
+    if not character:
+        await websocket.close()
+        return
+    
+    room_id = character.room_id
+    
+    if room_id not in connections:
+        connections[room_id] = []
+    connections[room_id].append(websocket)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                
+                if msg.get('type') == 'update':
+                    # Обновление карточки
+                    session = Session()
+                    character = session.query(Character).filter_by(id=character_id).first()
+                    if character:
+                        for key, value in msg.get('data', {}).items():
+                            if hasattr(character, key):
+                                setattr(character, key, value)
+                        session.commit()
+                        
+                        # Отправляем обновление всем в комнате
+                        await broadcast_to_room(room_id, {
+                            'type': 'character_updated',
+                            'character_id': character_id,
+                            'character': character.to_dict()
+                        })
+                    session.close()
+                
+                elif msg.get('type') == 'get':
+                    # Запрос текущего состояния
+                    session = Session()
+                    character = session.query(Character).filter_by(id=character_id).first()
+                    if character:
+                        await websocket.send_text(json.dumps({
+                            'type': 'character_data',
+                            'character': character.to_dict()
+                        }))
+                    session.close()
+                    
+            except json.JSONDecodeError:
+                pass
+                
+    except WebSocketDisconnect:
+        if room_id in connections:
+            if websocket in connections[room_id]:
+                connections[room_id].remove(websocket)
+            if not connections[room_id]:
+                del connections[room_id]
+
+# ============================================================
+# 12. СТРАНИЦЫ
+# ============================================================
+
+@app.get("/")
+async def root(request: Request):
+    user = get_current_user(request)
+    if user:
+        if user.role == 'gm':
+            return RedirectResponse(url="/gm_dashboard", status_code=303)
+        else:
+            return RedirectResponse(url="/player_dashboard", status_code=303)
+    return RedirectResponse(url="/login", status_code=303)
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/login")
+async def login(request: Request, login_or_email: str = Form(...), password: str = Form(...), next: str = Form("")):
+    from itsdangerous import URLSafeTimedSerializer
+    serializer = URLSafeTimedSerializer("dnd_super_secret_key_2025")
+    user = get_user_by_login_or_email(login_or_email)
+    if not user or user.password_hash != hash_password(password):
+        return HTMLResponse(content="<h2>❌ Неверный логин/email или пароль</h2><a href='/login'>Вернуться</a>", status_code=400)
+    session_token = serializer.dumps({"user_id": user.id})
+    if next:
+        response = RedirectResponse(url=next, status_code=303)
+    elif user.role == 'gm':
+        response = RedirectResponse(url="/gm_dashboard", status_code=303)
+    else:
+        response = RedirectResponse(url="/player_dashboard", status_code=303)
+    response.set_cookie(key="session", value=session_token, httponly=True, max_age=604800)
+    return response
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
+
+@app.post("/register")
+async def register(request: Request, login: str = Form(...), email: str = Form(...), password: str = Form(...), password_confirm: str = Form(...), role: str = Form("unassigned")):
+    if password != password_confirm:
+        return HTMLResponse(content="<h2>Ошибка: Пароли не совпадают</h2><a href='/register'>Назад</a>", status_code=400)
+    if len(password) < 8:
+        return HTMLResponse(content="<h2>Ошибка: Пароль должен быть не менее 8 символов</h2><a href='/register'>Назад</a>", status_code=400)
+    session = Session()
+    if session.query(User).filter_by(login=login).first():
+        session.close()
+        return HTMLResponse(content="<h2>Ошибка: Логин уже занят</h2><a href='/register'>Назад</a>", status_code=400)
+    if session.query(User).filter_by(email=email).first():
+        session.close()
+        return HTMLResponse(content="<h2>Ошибка: Email уже зарегистрирован</h2><a href='/register'>Назад</a>", status_code=400)
+    session.close()
+    user_id = create_user(login, email, password, role)
+    return RedirectResponse(url="/login?registered=true", status_code=303)
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("session")
+    return response
+
+@app.get("/gm_dashboard", response_class=HTMLResponse)
+async def gm_dashboard(request: Request):
+    user = get_current_user(request)
+    if not user or user.role != 'gm':
+        return RedirectResponse(url="/login", status_code=303)
+    rooms = room_manager.get_all_rooms()
+    return templates.TemplateResponse("gm_dashboard.html", {
+        "request": request,
+        "user": user,
+        "rooms": rooms
+    })
+
+@app.get("/player_dashboard", response_class=HTMLResponse)
+async def player_dashboard(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    session = Session()
+    player_rooms = session.query(GameRoom).join(RoomPlayer).filter(RoomPlayer.user_id == user.id).all()
+    session.close()
+    return templates.TemplateResponse("player_dashboard.html", {
+        "request": request,
+        "user": user,
+        "rooms": player_rooms
+    })
+
+@app.get("/join/{room_id}", response_class=HTMLResponse)
+async def join_room_page(request: Request, room_id: str):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url=f"/login?next=/join/{room_id}", status_code=303)
+    return RedirectResponse(url=f"/room/{room_id}", status_code=303)
+
+@app.get("/room/{room_id}", response_class=HTMLResponse)
+async def room_page(request: Request, room_id: str):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url=f"/login?next=/room/{room_id}", status_code=303)
+    
+    room = room_manager.get_room(room_id)
+    if not room:
+        return HTMLResponse(content="<h2>❌ Комната не найдена</h2><a href='/'>На главную</a>", status_code=404)
+    
+    session = Session()
+    room_player = session.query(RoomPlayer).filter_by(room_id=room.id, user_id=user.id).first()
+    if not room_player:
+        return HTMLResponse(content="<h2>⛔ Вы не в этой комнате</h2><a href='/'>На главную</a>", status_code=403)
+    
+    characters = session.query(Character).filter_by(room_id=room.id).all()
+    skills = session.query(CustomSkill).filter_by(room_id=room.id).all()
+    tokens = session.query(GameToken).filter_by(room_id=room.id).all()
+    session.close()
+    
+    return templates.TemplateResponse("room.html", {
+        "request": request,
+        "user": user,
+        "room": room,
+        "characters": characters,
+        "skills": skills,
+        "tokens": tokens,
+        "is_gm": room.gm_id == user.id
+    })
+
+# ============================================================
+# 13. ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
