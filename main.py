@@ -13,6 +13,7 @@ import uuid
 import random
 import math
 import re
+import asyncio
 from typing import Dict, Optional, List, Any, Set, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -33,34 +34,33 @@ class RoomState(str, Enum):
     PAUSED = "paused"
     FINISHED = "finished"
 
-class InventoryEventType(str, Enum):
-    ITEM_ADDED = "item_added"
-    ITEM_REMOVED = "item_removed"
-    ITEM_MOVED = "item_moved"
-    ITEM_USED = "item_used"
-    ITEM_DROPPED = "item_dropped"
-    ITEM_TRANSFERRED = "item_transferred"
-    INVENTORY_OPENED = "inventory_opened"
-    INVENTORY_CLOSED = "inventory_closed"
-    STACK_SPLIT = "stack_split"
-    STACK_MERGED = "stack_merged"
-    EQUIPMENT_CHANGED = "equipment_changed"
-    LOOT_ADDED = "loot_added"
-    LOOT_REMOVED = "loot_removed"
+class DiceType(str, Enum):
+    D2 = "d2"
+    D4 = "d4"
+    D6 = "d6"
+    D8 = "d8"
+    D10 = "d10"
+    D12 = "d12"
+    D20 = "d20"
+    D100 = "d100"
 
-class EquipmentSlot(str, Enum):
-    HEAD = "head"
-    BODY = "body"
-    LEGS = "legs"
-    HANDS = "hands"
-    FEET = "feet"
-    RING_1 = "ring_1"
-    RING_2 = "ring_2"
-    NECK = "neck"
-    MAIN_HAND = "main_hand"
-    OFF_HAND = "off_hand"
-    BACK = "back"
-    ACCESSORY = "accessory"
+class DiceVisibility(str, Enum):
+    PUBLIC = "public"
+    SECRET = "secret"
+
+class DiceEventType(str, Enum):
+    ROLL_STARTED = "roll_started"
+    ANIMATION_STARTED = "animation_started"
+    ANIMATION_FINISHED = "animation_finished"
+    ROLL_COMPLETED = "roll_completed"
+    CRITICAL_SUCCESS = "critical_success"
+    CRITICAL_FAILURE = "critical_failure"
+
+class RollModifierType(str, Enum):
+    ADVANTAGE = "advantage"
+    DISADVANTAGE = "disadvantage"
+    BONUS = "bonus"
+    PENALTY = "penalty"
     CUSTOM = "custom"
 
 # ============================================================
@@ -105,14 +105,35 @@ class Character(Base):
     inventory = Column(JSON, default='[]')
     equipment = Column(JSON, default='{}')
     effects = Column(JSON, default='[]')
-    max_weight = Column(Float, default=100.0)
-    max_slots = Column(Integer, default=50)
     player_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     room_id = Column(Integer, ForeignKey('game_rooms.id'), nullable=True)
     is_npc = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('users.id'))
+
+class DiceHistory(Base):
+    __tablename__ = 'dice_history'
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey('game_rooms.id'))
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    character_id = Column(Integer, ForeignKey('characters.id'), nullable=True)
+    dice_type = Column(String(10))
+    count = Column(Integer, default=1)
+    modifier = Column(Integer, default=0)
+    formula = Column(String(100))
+    results = Column(JSON, default='[]')
+    total = Column(Integer, default=0)
+    final_total = Column(Integer, default=0)
+    is_critical = Column(Boolean, default=False)
+    is_fumble = Column(Boolean, default=False)
+    visibility = Column(String(20), default='public')
+    reason = Column(String(200), default='')
+    timestamp = Column(DateTime, default=datetime.now)
+    advantage_used = Column(Boolean, default=False)
+    disadvantage_used = Column(Boolean, default=False)
+    user = relationship("User", foreign_keys=[user_id])
+    character = relationship("Character", foreign_keys=[character_id])
 
 class GameRoom(Base):
     __tablename__ = 'game_rooms'
@@ -139,6 +160,7 @@ class GameRoom(Base):
     tokens = relationship("GameToken", backref="room", cascade="all, delete-orphan")
     players = relationship("RoomPlayer", backref="room", cascade="all, delete-orphan")
     characters = relationship("Character", backref="room", cascade="all, delete-orphan")
+    dice_history = relationship("DiceHistory", backref="room", cascade="all, delete-orphan")
 
 class RoomPlayer(Base):
     __tablename__ = 'room_players'
@@ -186,498 +208,430 @@ class ActionLog(Base):
     gm_modified = Column(Boolean, default=False)
 
 # ============================================================
-# 3. INVENTORY SYSTEM (ФИНАЛЬНАЯ ВЕРСИЯ)
+# 3. DICE ENGINE (ФИНАЛЬНАЯ ВЕРСИЯ)
 # ============================================================
 
 @dataclass
-class InventoryItem:
-    """Универсальный предмет инвентаря. Не зависит от сеттинга."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ''
-    description: str = ''
-    icon: str = ''
-    type: str = 'misc'  # weapon, armor, consumable, tool, key, quest, container, misc, currency, document, artifact, ammo, spellbook, ingredient, custom
-    weight: float = 0.0
-    rarity: str = 'common'  # common, uncommon, rare, epic, legendary, artifact, custom
-    stackable: bool = True
-    quantity: int = 1
-    max_quantity: int = 999
-    actions: List[str] = field(default_factory=list)  # use, equip, drink, read, shoot, etc.
-    effects: List[Dict] = field(default_factory=list)  # [{"type": "damage", "value": "2d6"}, {"type": "heal", "value": "1d8"}]
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)  # {"damage": "2d6", "range": 6, "ammo": 5}
-    container_id: str = ''  # Для вложенных контейнеров
-    position: int = 0  # Порядок в инвентаре
-    equipped_slot: Optional[str] = None  # Если предмет экипирован
+class RollRequest:
+    """Запрос на бросок кубиков."""
+    dice_type: str  # d4, d6, d8, d10, d12, d20, d100
+    count: int = 1
+    modifier: int = 0
+    reason: str = ''
+    visibility: DiceVisibility = DiceVisibility.PUBLIC
+    user_id: int = 0
+    character_id: int = 0
+    room_id: int = 0
+    advantage: bool = False
+    disadvantage: bool = False
+    custom_modifiers: List[Dict] = field(default_factory=list)  # [{"type": "bonus", "value": 2, "reason": "Bless"}]
     
     def to_dict(self) -> dict:
         return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'icon': self.icon,
-            'type': self.type,
-            'weight': self.weight,
-            'rarity': self.rarity,
-            'stackable': self.stackable,
-            'quantity': self.quantity,
-            'max_quantity': self.max_quantity,
-            'actions': self.actions,
-            'effects': self.effects,
-            'tags': self.tags,
-            'metadata': self.metadata,
-            'container_id': self.container_id,
-            'position': self.position,
-            'equipped_slot': self.equipped_slot
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'modifier': self.modifier,
+            'reason': self.reason,
+            'visibility': self.visibility.value,
+            'user_id': self.user_id,
+            'character_id': self.character_id,
+            'room_id': self.room_id,
+            'advantage': self.advantage,
+            'disadvantage': self.disadvantage,
+            'custom_modifiers': self.custom_modifiers
+        }
+
+@dataclass
+class RollResult:
+    """Результат броска кубиков."""
+    dice_type: str
+    count: int
+    modifier: int
+    results: List[int]
+    total: int
+    final_total: int
+    is_critical: bool = False
+    is_fumble: bool = False
+    visibility: DiceVisibility = DiceVisibility.PUBLIC
+    reason: str = ''
+    user_id: int = 0
+    character_id: int = 0
+    room_id: int = 0
+    roll_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.now)
+    advantage_used: bool = False
+    disadvantage_used: bool = False
+    custom_modifiers_applied: List[Dict] = field(default_factory=list)
+    
+    def to_dict(self) -> dict:
+        return {
+            'roll_id': self.roll_id,
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'modifier': self.modifier,
+            'results': self.results,
+            'total': self.total,
+            'final_total': self.final_total,
+            'is_critical': self.is_critical,
+            'is_fumble': self.is_fumble,
+            'visibility': self.visibility.value,
+            'reason': self.reason,
+            'user_id': self.user_id,
+            'character_id': self.character_id,
+            'room_id': self.room_id,
+            'timestamp': self.timestamp.isoformat(),
+            'advantage_used': self.advantage_used,
+            'disadvantage_used': self.disadvantage_used,
+            'custom_modifiers_applied': self.custom_modifiers_applied
         }
     
-    @classmethod
-    def from_dict(cls, data: dict) -> 'InventoryItem':
-        return cls(
-            id=data.get('id', str(uuid.uuid4())),
-            name=data.get('name', ''),
-            description=data.get('description', ''),
-            icon=data.get('icon', ''),
-            type=data.get('type', 'misc'),
-            weight=data.get('weight', 0.0),
-            rarity=data.get('rarity', 'common'),
-            stackable=data.get('stackable', True),
-            quantity=data.get('quantity', 1),
-            max_quantity=data.get('max_quantity', 999),
-            actions=data.get('actions', []),
-            effects=data.get('effects', []),
-            tags=data.get('tags', []),
-            metadata=data.get('metadata', {}),
-            container_id=data.get('container_id', ''),
-            position=data.get('position', 0),
-            equipped_slot=data.get('equipped_slot')
-        )
-    
-    def can_stack_with(self, other: 'InventoryItem') -> bool:
-        """Проверяет, можно ли объединить предметы."""
-        if not self.stackable or not other.stackable:
-            return False
-        if self.name != other.name:
-            return False
-        if self.type != other.type:
-            return False
-        if self.metadata != other.metadata:
-            return False
-        return True
-    
-    def stack_with(self, other: 'InventoryItem') -> int:
-        """Объединяет предметы. Возвращает количество перенесённых предметов."""
-        if not self.can_stack_with(other):
-            return 0
-        space = self.max_quantity - self.quantity
-        transfer = min(space, other.quantity)
-        self.quantity += transfer
-        other.quantity -= transfer
-        return transfer
-    
-    def get_total_weight(self) -> float:
-        """Возвращает общий вес предмета (вес * количество)."""
-        return self.weight * self.quantity
+    def get_animation_data(self) -> dict:
+        """Возвращает данные для анимации кубиков."""
+        return {
+            'roll_id': self.roll_id,
+            'dice_type': self.dice_type,
+            'count': self.count,
+            'results': self.results,
+            'total': self.total,
+            'final_total': self.final_total,
+            'is_critical': self.is_critical,
+            'is_fumble': self.is_fumble,
+            'color': '#ffd700' if self.is_critical else '#ff4444' if self.is_fumble else '#ffffff',
+            'critical_type': 'critical_success' if self.is_critical else 'critical_failure' if self.is_fumble else None
+        }
 
-
-class Inventory:
+class DiceEngine:
     """
-    Универсальный инвентарь. Не зависит от сеттинга.
-    Только хранение и управление предметами.
+    Универсальная система бросков кубиков.
+    Не знает про D&D, Vampire или другие системы.
+    Только кубики.
     """
     
-    def __init__(self, owner_id: int = 0, owner_type: str = 'character'):
-        self.owner_id = owner_id
-        self.owner_type = owner_type
-        self._items: Dict[str, InventoryItem] = {}
-        self._container_items: Dict[str, List[str]] = {}  # container_id -> [item_ids]
-        self._equipped_items: Dict[str, str] = {}  # slot -> item_id
-        self._event_listeners: Dict[InventoryEventType, List[Callable]] = {}
+    # Доступные типы кубиков и их максимальные значения
+    _DICE_SIDES = {
+        'd2': 2,
+        'd4': 4,
+        'd6': 6,
+        'd8': 8,
+        'd10': 10,
+        'd12': 12,
+        'd20': 20,
+        'd100': 100
+    }
     
-    # ===== УПРАВЛЕНИЕ ПРЕДМЕТАМИ =====
+    def __init__(self):
+        self._event_listeners: Dict[DiceEventType, List[Callable]] = {}
+        self._history: List[RollResult] = []
     
-    def add_item(self, item: InventoryItem, container_id: str = '') -> bool:
-        """Добавляет предмет в инвентарь."""
-        # Проверяем лимит веса
-        if self.get_total_weight() + item.get_total_weight() > self.get_max_weight():
-            self._publish_event(InventoryEventType.ITEM_ADDED, item, {'error': 'weight_limit_exceeded'})
-            return False
-        
-        # Проверяем лимит слотов
-        if len(self._items) >= self.get_max_slots():
-            self._publish_event(InventoryEventType.ITEM_ADDED, item, {'error': 'slot_limit_exceeded'})
-            return False
-        
-        # Проверяем, можно ли добавить в стек
-        if item.stackable:
-            for existing in self._items.values():
-                if existing.can_stack_with(item) and existing.container_id == container_id:
-                    existing.quantity += item.quantity
-                    self._publish_event(InventoryEventType.ITEM_ADDED, item)
-                    return True
-        
-        # Добавляем новый предмет
-        item.container_id = container_id
-        item.position = len(self._items)
-        self._items[item.id] = item
-        
-        if container_id:
-            if container_id not in self._container_items:
-                self._container_items[container_id] = []
-            self._container_items[container_id].append(item.id)
-        
-        self._publish_event(InventoryEventType.ITEM_ADDED, item)
-        return True
+    # ===== ОСНОВНЫЕ МЕТОДЫ БРОСКОВ =====
     
-    def remove_item(self, item_id: str, quantity: int = None) -> Optional[InventoryItem]:
-        """Удаляет предмет из инвентаря."""
-        item = self._items.get(item_id)
-        if not item:
-            return None
+    def roll(self, request: RollRequest) -> RollResult:
+        """
+        Выполняет бросок кубиков.
+        Единственный метод для всех бросков.
+        """
+        # Проверяем валидность dice_type
+        dice_type = request.dice_type.lower()
+        if dice_type not in self._DICE_SIDES:
+            raise ValueError(f"Неизвестный тип кубика: {dice_type}")
         
-        # Если предмет экипирован, снимаем его
-        if item.equipped_slot:
-            self.unequip_item(item_id)
+        max_value = self._DICE_SIDES[dice_type]
         
-        if quantity is not None and quantity < item.quantity:
-            # Удаляем часть стека
-            removed = InventoryItem(
-                name=item.name,
-                description=item.description,
-                icon=item.icon,
-                type=item.type,
-                weight=item.weight,
-                rarity=item.rarity,
-                stackable=item.stackable,
-                quantity=quantity,
-                max_quantity=item.max_quantity,
-                actions=item.actions.copy(),
-                effects=item.effects.copy(),
-                tags=item.tags.copy(),
-                metadata=item.metadata.copy()
-            )
-            item.quantity -= quantity
-            self._publish_event(InventoryEventType.ITEM_REMOVED, removed)
-            return removed
+        # Обработка преимущества/помехи
+        results = []
+        if request.advantage or request.disadvantage:
+            if dice_type == 'd20' and request.count == 1:
+                # Два броска
+                roll1 = random.randint(1, max_value)
+                roll2 = random.randint(1, max_value)
+                
+                if request.advantage:
+                    results = [max(roll1, roll2)]
+                else:
+                    results = [min(roll1, roll2)]
+                
+                # Сохраняем оба броска для истории
+                self._last_rolls = [roll1, roll2]
+            else:
+                # Преимущество/помеха только для d20
+                results = [random.randint(1, max_value) for _ in range(request.count)]
         else:
-            # Удаляем весь предмет
-            if item.container_id in self._container_items:
-                if item.id in self._container_items[item.container_id]:
-                    self._container_items[item.container_id].remove(item.id)
-            
-            del self._items[item_id]
-            self._publish_event(InventoryEventType.ITEM_REMOVED, item)
-            return item
-    
-    def get_item(self, item_id: str) -> Optional[InventoryItem]:
-        """Получает предмет по ID."""
-        return self._items.get(item_id)
-    
-    def get_items(self, container_id: str = '') -> List[InventoryItem]:
-        """Получает все предметы в контейнере."""
-        if container_id:
-            item_ids = self._container_items.get(container_id, [])
-            return [self._items[iid] for iid in item_ids if iid in self._items]
-        return list(self._items.values())
-    
-    def get_all_items(self) -> List[InventoryItem]:
-        """Получает все предметы."""
-        return list(self._items.values())
-    
-    # ===== ЭКИПИРОВКА =====
-    
-    def equip_item(self, item_id: str, slot: str) -> bool:
-        """Экипирует предмет в указанный слот."""
-        item = self._items.get(item_id)
-        if not item:
-            return False
+            results = [random.randint(1, max_value) for _ in range(request.count)]
         
-        # Проверяем, что предмет можно экипировать
-        if 'equip' not in item.actions:
-            return False
+        total = sum(results)
         
-        # Если слот занят, снимаем старый предмет
-        if slot in self._equipped_items:
-            old_item_id = self._equipped_items[slot]
-            old_item = self._items.get(old_item_id)
-            if old_item:
-                old_item.equipped_slot = None
+        # Применяем модификаторы
+        total_modifier = request.modifier
+        custom_modifiers_applied = []
         
-        # Экипируем новый предмет
-        item.equipped_slot = slot
-        self._equipped_items[slot] = item_id
+        for mod in request.custom_modifiers:
+            if mod.get('type') == 'bonus':
+                total_modifier += mod.get('value', 0)
+                custom_modifiers_applied.append(mod)
+            elif mod.get('type') == 'penalty':
+                total_modifier -= mod.get('value', 0)
+                custom_modifiers_applied.append(mod)
         
-        self._publish_event(InventoryEventType.EQUIPMENT_CHANGED, item)
-        return True
-    
-    def unequip_item(self, item_id: str) -> bool:
-        """Снимает предмет с экипировки."""
-        item = self._items.get(item_id)
-        if not item or not item.equipped_slot:
-            return False
+        final_total = total + total_modifier
         
-        slot = item.equipped_slot
-        if slot in self._equipped_items:
-            del self._equipped_items[slot]
+        # Определяем критические результаты (только для d20)
+        is_critical = False
+        is_fumble = False
+        if dice_type == 'd20' and request.count == 1:
+            if request.advantage:
+                # При преимуществе критический успех если хотя бы один 20
+                is_critical = any(r == 20 for r in self._last_rolls if hasattr(self, '_last_rolls'))
+                # Критический провал если оба 1
+                is_fumble = all(r == 1 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
+            elif request.disadvantage:
+                # При помехе критический провал если хотя бы один 1
+                is_fumble = any(r == 1 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
+                # Критический успех если оба 20
+                is_critical = all(r == 20 for r in self._last_rolls) if hasattr(self, '_last_rolls') else False
+            else:
+                # Обычный бросок
+                roll = results[0] if results else 0
+                is_critical = roll == 20
+                is_fumble = roll == 1
         
-        item.equipped_slot = None
-        self._publish_event(InventoryEventType.EQUIPMENT_CHANGED, item)
-        return True
-    
-    def get_equipped_items(self) -> Dict[str, InventoryItem]:
-        """Получает все экипированные предметы."""
-        result = {}
-        for slot, item_id in self._equipped_items.items():
-            item = self._items.get(item_id)
-            if item:
-                result[slot] = item
+        result = RollResult(
+            dice_type=dice_type,
+            count=request.count,
+            modifier=total_modifier,
+            results=results,
+            total=total,
+            final_total=final_total,
+            is_critical=is_critical,
+            is_fumble=is_fumble,
+            visibility=request.visibility,
+            reason=request.reason,
+            user_id=request.user_id,
+            character_id=request.character_id,
+            room_id=request.room_id,
+            advantage_used=request.advantage,
+            disadvantage_used=request.disadvantage,
+            custom_modifiers_applied=custom_modifiers_applied
+        )
+        
+        # Публикуем события
+        self._publish_event(DiceEventType.ROLL_STARTED, result)
+        
+        if is_critical:
+            self._publish_event(DiceEventType.CRITICAL_SUCCESS, result)
+        elif is_fumble:
+            self._publish_event(DiceEventType.CRITICAL_FAILURE, result)
+        
+        # Сохраняем в историю
+        self._history.append(result)
+        
+        # Публикуем завершение
+        self._publish_event(DiceEventType.ROLL_COMPLETED, result)
+        
         return result
     
-    # ===== ВЕС И ЛИМИТЫ =====
+    def roll_formula(self, formula: str, **kwargs) -> RollResult:
+        """
+        Выполняет бросок по формуле (например: '2d6+4').
+        Поддерживает: 1d20, 2d6, 4d6, 3d8+2, 1d100
+        """
+        # Парсим формулу
+        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
+        if not match:
+            raise ValueError(f"Неверный формат формулы: {formula}")
+        
+        count = int(match.group(1) or 1)
+        dice_type = f"d{match.group(2)}"
+        extra_mod = int(match.group(3) or 0) if match.group(3) else 0
+        
+        request = RollRequest(
+            dice_type=dice_type,
+            count=count,
+            modifier=extra_mod + kwargs.get('modifier', 0),
+            reason=kwargs.get('reason', formula),
+            visibility=kwargs.get('visibility', DiceVisibility.PUBLIC),
+            user_id=kwargs.get('user_id', 0),
+            character_id=kwargs.get('character_id', 0),
+            room_id=kwargs.get('room_id', 0),
+            advantage=kwargs.get('advantage', False),
+            disadvantage=kwargs.get('disadvantage', False),
+            custom_modifiers=kwargs.get('custom_modifiers', [])
+        )
+        
+        return self.roll(request)
     
-    def get_total_weight(self) -> float:
-        """Вычисляет общий вес инвентаря."""
-        return sum(item.get_total_weight() for item in self._items.values())
+    # ===== ПАРСИНГ ФОРМУЛ =====
     
-    def get_max_weight(self) -> float:
-        """Возвращает максимальный вес (из Character)."""
-        return getattr(self, '_max_weight', 100.0)
+    def parse_formula(self, formula: str) -> dict:
+        """
+        Разбирает формулу на составляющие.
+        Возвращает: {'count': int, 'dice_type': str, 'modifier': int}
+        """
+        match = re.match(r'(\d+)?d(\d+)([+-]\d+)?', formula.strip())
+        if not match:
+            raise ValueError(f"Неверный формат формулы: {formula}")
+        
+        return {
+            'count': int(match.group(1) or 1),
+            'dice_type': f"d{match.group(2)}",
+            'modifier': int(match.group(3) or 0) if match.group(3) else 0
+        }
     
-    def get_max_slots(self) -> int:
-        """Возвращает максимальное количество слотов."""
-        return getattr(self, '_max_slots', 50)
+    # ===== ВИЗУАЛИЗАЦИЯ =====
     
-    def set_limits(self, max_weight: float, max_slots: int):
-        """Устанавливает лимиты инвентаря."""
-        self._max_weight = max_weight
-        self._max_slots = max_slots
+    def get_animation_data(self, result: RollResult) -> dict:
+        """Возвращает данные для анимации кубиков."""
+        return result.get_animation_data()
     
-    # ===== ПЕРЕМЕЩЕНИЕ ПРЕДМЕТОВ =====
+    def generate_dice_animation(self, result: RollResult) -> List[dict]:
+        """
+        Генерирует анимацию для кубиков.
+        Возвращает список кадров анимации.
+        """
+        animation = []
+        
+        # Начальное состояние
+        animation.append({
+            'frame': 0,
+            'dice': result.results.copy(),
+            'positions': [(random.randint(-100, 100), random.randint(-100, 100)) for _ in result.results],
+            'rotations': [random.randint(0, 360) for _ in result.results],
+            'scale': 0.1
+        })
+        
+        # Промежуточные кадры (вращение и движение)
+        for frame in range(1, 20):
+            progress = frame / 20
+            positions = []
+            rotations = []
+            for i in range(len(result.results)):
+                angle = progress * 720 + random.uniform(-10, 10)
+                x = math.sin(angle) * 50 * (1 - progress)
+                y = -math.cos(angle) * 50 * (1 - progress) + 50 * progress
+                positions.append((x, y))
+                rotations.append(angle)
+            
+            animation.append({
+                'frame': frame,
+                'dice': result.results.copy(),
+                'positions': positions,
+                'rotations': rotations,
+                'scale': 0.1 + 0.9 * min(1, progress * 2)
+            })
+        
+        # Финальное состояние
+        final_positions = []
+        for i in range(len(result.results)):
+            final_positions.append((
+                (i - len(result.results) / 2) * 80 + random.uniform(-10, 10),
+                random.uniform(-10, 10)
+            ))
+        
+        animation.append({
+            'frame': 21,
+            'dice': result.results.copy(),
+            'positions': final_positions,
+            'rotations': [0, 90, 180, 270, 0, 90, 180, 270][:len(result.results)],
+            'scale': 1.0,
+            'final': True,
+            'total': result.final_total,
+            'is_critical': result.is_critical,
+            'is_fumble': result.is_fumble
+        })
+        
+        return animation
     
-    def move_item(self, item_id: str, target_container_id: str) -> bool:
-        """Перемещает предмет в другой контейнер."""
-        item = self._items.get(item_id)
-        if not item:
+    # ===== ИСТОРИЯ =====
+    
+    def get_history(self, limit: int = 50, room_id: int = None) -> List[RollResult]:
+        """Возвращает историю бросков."""
+        history = self._history
+        if room_id:
+            history = [r for r in history if r.room_id == room_id]
+        return history[-limit:]
+    
+    def save_history_to_db(self, result: RollResult) -> bool:
+        """Сохраняет результат броска в базу данных."""
+        session = Session()
+        try:
+            history_entry = DiceHistory(
+                room_id=result.room_id,
+                user_id=result.user_id,
+                character_id=result.character_id,
+                dice_type=result.dice_type,
+                count=result.count,
+                modifier=result.modifier,
+                formula=f"{result.count}{result.dice_type}{'+' + str(result.modifier) if result.modifier else ''}",
+                results=json.dumps(result.results),
+                total=result.total,
+                final_total=result.final_total,
+                is_critical=result.is_critical,
+                is_fumble=result.is_fumble,
+                visibility=result.visibility.value,
+                reason=result.reason,
+                timestamp=result.timestamp,
+                advantage_used=result.advantage_used,
+                disadvantage_used=result.disadvantage_used
+            )
+            session.add(history_entry)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print(f"Error saving dice history: {e}")
             return False
-        
-        # Удаляем из старого контейнера
-        if item.container_id in self._container_items:
-            if item.id in self._container_items[item.container_id]:
-                self._container_items[item.container_id].remove(item.id)
-        
-        # Добавляем в новый контейнер
-        item.container_id = target_container_id
-        if target_container_id:
-            if target_container_id not in self._container_items:
-                self._container_items[target_container_id] = []
-            self._container_items[target_container_id].append(item.id)
-        
-        self._publish_event(InventoryEventType.ITEM_MOVED, item)
-        return True
+        finally:
+            session.close()
     
-    def transfer_item(self, item_id: str, target_inventory: 'Inventory', quantity: int = None) -> bool:
-        """Передаёт предмет другому инвентарю."""
-        item = self.remove_item(item_id, quantity)
-        if not item:
-            return False
-        
-        success = target_inventory.add_item(item)
-        if success:
-            self._publish_event(InventoryEventType.ITEM_TRANSFERRED, item)
-        else:
-            # Возвращаем предмет обратно
-            self.add_item(item)
-        
-        return success
-    
-    def drop_item(self, item_id: str, quantity: int = None) -> Optional[InventoryItem]:
-        """Выбрасывает предмет."""
-        item = self.remove_item(item_id, quantity)
-        if item:
-            self._publish_event(InventoryEventType.ITEM_DROPPED, item)
-        return item
-    
-    # ===== ПОИСК И ФИЛЬТРАЦИЯ =====
-    
-    def find_by_name(self, name: str) -> List[InventoryItem]:
-        """Ищет предметы по имени."""
-        name_lower = name.lower()
-        return [item for item in self._items.values() if name_lower in item.name.lower()]
-    
-    def find_by_type(self, type_name: str) -> List[InventoryItem]:
-        """Ищет предметы по типу."""
-        return [item for item in self._items.values() if item.type == type_name]
-    
-    def find_by_tag(self, tag: str) -> List[InventoryItem]:
-        """Ищет предметы по тегу."""
-        return [item for item in self._items.values() if tag in item.tags]
-    
-    def find_by_action(self, action: str) -> List[InventoryItem]:
-        """Ищет предметы по действию."""
-        return [item for item in self._items.values() if action in item.actions]
-    
-    def filter_by_rarity(self, rarity: str) -> List[InventoryItem]:
-        """Фильтрует по редкости."""
-        return [item for item in self._items.values() if item.rarity == rarity]
+    def clear_history(self):
+        """Очищает историю бросков."""
+        self._history = []
     
     # ===== СОБЫТИЯ =====
     
-    def subscribe(self, event_type: InventoryEventType, callback: Callable):
-        """Подписывается на события инвентаря."""
+    def subscribe(self, event_type: DiceEventType, callback: Callable):
+        """Подписывается на события бросков."""
         if event_type not in self._event_listeners:
             self._event_listeners[event_type] = []
         self._event_listeners[event_type].append(callback)
     
-    def _publish_event(self, event_type: InventoryEventType, item: InventoryItem, extra: dict = None):
+    def _publish_event(self, event_type: DiceEventType, data: RollResult):
         """Публикует событие."""
         if event_type in self._event_listeners:
             for callback in self._event_listeners[event_type]:
                 try:
-                    callback(event_type, item, extra or {})
+                    callback(event_type, data)
                 except Exception as e:
-                    print(f"Error in inventory event callback: {e}")
+                    print(f"Error in dice event callback: {e}")
     
-    # ===== СЕРИАЛИЗАЦИЯ =====
+    # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
     
-    def to_dict(self) -> dict:
-        """Преобразует инвентарь в словарь для JSON."""
-        return {
-            'owner_id': self.owner_id,
-            'owner_type': self.owner_type,
-            'items': [item.to_dict() for item in self._items.values()],
-            'equipped': {slot: item_id for slot, item_id in self._equipped_items.items()},
-            'total_weight': self.get_total_weight(),
-            'max_weight': self.get_max_weight(),
-            'max_slots': self.get_max_slots(),
-            'item_count': len(self._items)
+    def get_supported_dice(self) -> List[str]:
+        """Возвращает список поддерживаемых типов кубиков."""
+        return list(self._DICE_SIDES.keys())
+    
+    def get_max_value(self, dice_type: str) -> int:
+        """Возвращает максимальное значение для типа кубика."""
+        return self._DICE_SIDES.get(dice_type.lower(), 0)
+    
+    def get_dice_emoji(self, dice_type: str) -> str:
+        """Возвращает эмодзи для типа кубика."""
+        emojis = {
+            'd2': '🪙',
+            'd4': '🔺',
+            'd6': '🎲',
+            'd8': '🔶',
+            'd10': '💠',
+            'd12': '🔷',
+            'd20': '✨',
+            'd100': '💯'
         }
-    
-    def load_from_dict(self, data: dict):
-        """Загружает инвентарь из словаря."""
-        self._items = {}
-        self._container_items = {}
-        self._equipped_items = {}
-        
-        for item_data in data.get('items', []):
-            item = InventoryItem.from_dict(item_data)
-            self._items[item.id] = item
-            if item.container_id:
-                if item.container_id not in self._container_items:
-                    self._container_items[item.container_id] = []
-                self._container_items[item.container_id].append(item.id)
-            if item.equipped_slot:
-                self._equipped_items[item.equipped_slot] = item.id
-        
-        self.set_limits(
-            data.get('max_weight', 100.0),
-            data.get('max_slots', 50)
-        )
+        return emojis.get(dice_type.lower(), '🎲')
 
+# Создаём глобальный экземпляр Dice Engine
+dice_engine = DiceEngine()
 
 # ============================================================
-# 4. INVENTORY MANAGER
-# ============================================================
-
-class InventoryManager:
-    """Управляет инвентарями всех персонажей."""
-    
-    def __init__(self):
-        self._inventories: Dict[int, Inventory] = {}  # character_id -> Inventory
-    
-    def get_inventory(self, character_id: int) -> Optional[Inventory]:
-        """Получает инвентарь персонажа."""
-        return self._inventories.get(character_id)
-    
-    def load_inventory(self, character: Character) -> Inventory:
-        """Загружает инвентарь персонажа."""
-        inventory = Inventory(owner_id=character.id, owner_type='character')
-        inventory.set_limits(character.max_weight, character.max_slots)
-        
-        if character.inventory:
-            inventory_data = json.loads(character.inventory)
-            inventory.load_from_dict(inventory_data)
-        
-        self._inventories[character.id] = inventory
-        return inventory
-    
-    def save_inventory(self, character: Character) -> bool:
-        """Сохраняет инвентарь персонажа."""
-        inventory = self._inventories.get(character.id)
-        if not inventory:
-            return False
-        character.inventory = json.dumps(inventory.to_dict())
-        return True
-    
-    def add_item(self, character: Character, item_data: dict) -> bool:
-        """Добавляет предмет персонажу."""
-        inventory = self.get_inventory(character.id)
-        if not inventory:
-            inventory = self.load_inventory(character)
-        
-        item = InventoryItem.from_dict(item_data)
-        success = inventory.add_item(item)
-        if success:
-            self.save_inventory(character)
-        return success
-    
-    def remove_item(self, character: Character, item_id: str, quantity: int = None) -> bool:
-        """Удаляет предмет у персонажа."""
-        inventory = self.get_inventory(character.id)
-        if not inventory:
-            return False
-        
-        item = inventory.remove_item(item_id, quantity)
-        if item:
-            self.save_inventory(character)
-            return True
-        return False
-    
-    def transfer_item(self, source: Character, target: Character, item_id: str, quantity: int = None) -> bool:
-        """Передаёт предмет между персонажами."""
-        source_inv = self.get_inventory(source.id)
-        target_inv = self.get_inventory(target.id)
-        
-        if not source_inv:
-            source_inv = self.load_inventory(source)
-        if not target_inv:
-            target_inv = self.load_inventory(target)
-        
-        item = source_inv.get_item(item_id)
-        if not item:
-            return False
-        
-        success = source_inv.transfer_item(item_id, target_inv, quantity)
-        if success:
-            self.save_inventory(source)
-            self.save_inventory(target)
-        return success
-    
-    def equip_item(self, character: Character, item_id: str, slot: str) -> bool:
-        """Экипирует предмет."""
-        inventory = self.get_inventory(character.id)
-        if not inventory:
-            return False
-        
-        success = inventory.equip_item(item_id, slot)
-        if success:
-            self.save_inventory(character)
-        return success
-    
-    def unequip_item(self, character: Character, item_id: str) -> bool:
-        """Снимает предмет с экипировки."""
-        inventory = self.get_inventory(character.id)
-        if not inventory:
-            return False
-        
-        success = inventory.unequip_item(item_id)
-        if success:
-            self.save_inventory(character)
-        return success
-
-inventory_manager = InventoryManager()
-
-# ============================================================
-# 5. МИГРАЦИЯ
+# 4. МИГРАЦИЯ
 # ============================================================
 
 def migrate_database():
@@ -689,6 +643,10 @@ def migrate_database():
             print("🔄 Создаём таблицы...")
             Base.metadata.create_all(engine)
             print("✅ Таблицы созданы!")
+        if 'dice_history' not in inspector.get_table_names():
+            print("🔄 Создаём таблицу Dice History...")
+            Base.metadata.create_all(engine)
+            print("✅ Таблица истории бросков создана!")
         if 'action_logs' not in inspector.get_table_names():
             print("🔄 Создаём таблицу Action Logs...")
             Base.metadata.create_all(engine)
@@ -702,7 +660,7 @@ Base.metadata.create_all(engine)
 migrate_database()
 
 # ============================================================
-# 6. FASTAPI
+# 5. FASTAPI
 # ============================================================
 
 app = FastAPI()
@@ -717,7 +675,7 @@ os.makedirs(MAP_DIR, exist_ok=True)
 connections = {}
 
 # ============================================================
-# 7. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================
 
 def hash_password(password):
@@ -763,262 +721,242 @@ def generate_room_id():
     return secrets.token_urlsafe(8)
 
 # ============================================================
-# 8. API: INVENTORY
+# 7. API: DICE ENGINE
 # ============================================================
 
-@app.post("/api/inventory/load/{character_id}")
-async def load_inventory(character_id: int):
-    """Загружает инвентарь персонажа."""
-    session = Session()
+@app.post("/api/dice/roll")
+async def roll_dice(request: Request, data: dict):
+    """Выполняет бросок кубиков."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    dice_type = data.get('dice_type', 'd20')
+    count = data.get('count', 1)
+    modifier = data.get('modifier', 0)
+    reason = data.get('reason', 'Бросок')
+    visibility = data.get('visibility', 'public')
+    room_id_str = data.get('room_id')
+    character_id = data.get('character_id', 0)
+    advantage = data.get('advantage', False)
+    disadvantage = data.get('disadvantage', False)
+    custom_modifiers = data.get('custom_modifiers', [])
+    
     try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
+        visibility_enum = DiceVisibility(visibility)
+    except ValueError:
+        visibility_enum = DiceVisibility.PUBLIC
+    
+    # Получаем комнату
+    room_id = 0
+    if room_id_str:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+        if room:
+            room_id = room.id
+        session.close()
+    
+    # Создаём запрос
+    roll_request = RollRequest(
+        dice_type=dice_type,
+        count=count,
+        modifier=modifier,
+        reason=reason,
+        visibility=visibility_enum,
+        user_id=user.id,
+        character_id=character_id,
+        room_id=room_id,
+        advantage=advantage,
+        disadvantage=disadvantage,
+        custom_modifiers=custom_modifiers
+    )
+    
+    # Выполняем бросок
+    result = dice_engine.roll(roll_request)
+    
+    # Сохраняем в БД
+    dice_engine.save_history_to_db(result)
+    
+    # Отправляем всем в комнате (если публичный)
+    if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
+        await broadcast_to_room(room_id, {
+            'type': 'dice_roll',
+            'result': result.to_dict(),
+            'animation': result.get_animation_data(),
+            'dice_animation': dice_engine.generate_dice_animation(result)
+        })
+    
+    return {
+        'success': True,
+        'result': result.to_dict(),
+        'animation': result.get_animation_data(),
+        'dice_animation': dice_engine.generate_dice_animation(result)
+    }
+
+@app.post("/api/dice/roll/formula")
+async def roll_dice_formula(request: Request, data: dict):
+    """Выполняет бросок по формуле (например: 2d6+4)."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    formula = data.get('formula', '1d20')
+    modifier = data.get('modifier', 0)
+    reason = data.get('reason', formula)
+    visibility = data.get('visibility', 'public')
+    room_id_str = data.get('room_id')
+    character_id = data.get('character_id', 0)
+    advantage = data.get('advantage', False)
+    disadvantage = data.get('disadvantage', False)
+    custom_modifiers = data.get('custom_modifiers', [])
+    
+    try:
+        visibility_enum = DiceVisibility(visibility)
+    except ValueError:
+        visibility_enum = DiceVisibility.PUBLIC
+    
+    room_id = 0
+    if room_id_str:
+        session = Session()
+        room = session.query(GameRoom).filter_by(room_id=room_id_str).first()
+        if room:
+            room_id = room.id
+        session.close()
+    
+    try:
+        result = dice_engine.roll_formula(
+            formula=formula,
+            modifier=modifier,
+            reason=reason,
+            visibility=visibility_enum,
+            user_id=user.id,
+            character_id=character_id,
+            room_id=room_id,
+            advantage=advantage,
+            disadvantage=disadvantage,
+            custom_modifiers=custom_modifiers
+        )
         
-        inventory = inventory_manager.load_inventory(character)
+        dice_engine.save_history_to_db(result)
+        
+        if visibility_enum == DiceVisibility.PUBLIC and room_id_str:
+            await broadcast_to_room(room_id, {
+                'type': 'dice_roll',
+                'result': result.to_dict(),
+                'animation': result.get_animation_data(),
+                'dice_animation': dice_engine.generate_dice_animation(result)
+            })
+        
         return {
             'success': True,
-            'inventory': inventory.to_dict()
+            'result': result.to_dict(),
+            'animation': result.get_animation_data(),
+            'dice_animation': dice_engine.generate_dice_animation(result)
+        }
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
+
+@app.get("/api/dice/history/{room_id}")
+async def get_dice_history(room_id: str, limit: int = 50):
+    """Получает историю бросков в комнате."""
+    session = Session()
+    try:
+        room = session.query(GameRoom).filter_by(room_id=room_id).first()
+        if not room:
+            return {"success": False, "message": "Комната не найдена"}
+        
+        history = session.query(DiceHistory).filter_by(room_id=room.id).order_by(
+            DiceHistory.timestamp.desc()
+        ).limit(limit).all()
+        
+        return {
+            'success': True,
+            'history': [
+                {
+                    'id': h.id,
+                    'dice_type': h.dice_type,
+                    'count': h.count,
+                    'modifier': h.modifier,
+                    'formula': h.formula,
+                    'results': json.loads(h.results) if h.results else [],
+                    'total': h.total,
+                    'final_total': h.final_total,
+                    'is_critical': h.is_critical,
+                    'is_fumble': h.is_fumble,
+                    'visibility': h.visibility,
+                    'reason': h.reason,
+                    'timestamp': h.timestamp.isoformat(),
+                    'advantage_used': h.advantage_used,
+                    'disadvantage_used': h.disadvantage_used
+                }
+                for h in history
+            ]
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
     finally:
         session.close()
 
-@app.post("/api/inventory/add")
-async def add_item(request: Request, data: dict):
-    """Добавляет предмет персонажу."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    character_id = data.get('character_id')
-    item_data = data.get('item')
-    
-    if not character_id or not item_data:
-        return {"success": False, "message": "Не указаны character_id или item"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        success = inventory_manager.add_item(character, item_data)
-        session.commit()
-        
-        if success:
-            return {'success': True, 'message': 'Предмет добавлен'}
-        return {"success": False, "message": "Не удалось добавить предмет"}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
+@app.get("/api/dice/types")
+async def get_dice_types():
+    """Возвращает все поддерживаемые типы кубиков."""
+    return {
+        'success': True,
+        'dice_types': [
+            {'value': d, 'label': d.upper(), 'max_value': dice_engine.get_max_value(d), 'emoji': dice_engine.get_dice_emoji(d)}
+            for d in dice_engine.get_supported_dice()
+        ]
+    }
 
-@app.post("/api/inventory/remove")
-async def remove_item(request: Request, data: dict):
-    """Удаляет предмет у персонажа."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
+@app.post("/api/dice/parse")
+async def parse_dice_formula(data: dict):
+    """Разбирает формулу броска."""
+    formula = data.get('formula', '')
+    if not formula:
+        return {"success": False, "message": "Не указана формула"}
     
-    character_id = data.get('character_id')
-    item_id = data.get('item_id')
-    quantity = data.get('quantity')
-    
-    if not character_id or not item_id:
-        return {"success": False, "message": "Не указаны character_id или item_id"}
-    
-    session = Session()
     try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        success = inventory_manager.remove_item(character, item_id, quantity)
-        session.commit()
-        
-        if success:
-            return {'success': True, 'message': 'Предмет удалён'}
-        return {"success": False, "message": "Предмет не найден"}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/inventory/transfer")
-async def transfer_item(request: Request, data: dict):
-    """Передаёт предмет между персонажами."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    source_id = data.get('source_id')
-    target_id = data.get('target_id')
-    item_id = data.get('item_id')
-    quantity = data.get('quantity')
-    
-    if not source_id or not target_id or not item_id:
-        return {"success": False, "message": "Не указаны все параметры"}
-    
-    session = Session()
-    try:
-        source = session.query(Character).filter_by(id=source_id).first()
-        target = session.query(Character).filter_by(id=target_id).first()
-        
-        if not source or not target:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        success = inventory_manager.transfer_item(source, target, item_id, quantity)
-        session.commit()
-        
-        if success:
-            return {'success': True, 'message': 'Предмет передан'}
-        return {"success": False, "message": "Не удалось передать предмет"}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/inventory/equip")
-async def equip_item(request: Request, data: dict):
-    """Экипирует предмет."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    character_id = data.get('character_id')
-    item_id = data.get('item_id')
-    slot = data.get('slot')
-    
-    if not character_id or not item_id or not slot:
-        return {"success": False, "message": "Не указаны все параметры"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        success = inventory_manager.equip_item(character, item_id, slot)
-        session.commit()
-        
-        if success:
-            return {'success': True, 'message': 'Предмет экипирован'}
-        return {"success": False, "message": "Не удалось экипировать предмет"}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.post("/api/inventory/unequip")
-async def unequip_item(request: Request, data: dict):
-    """Снимает предмет с экипировки."""
-    user = get_current_user(request)
-    if not user:
-        return {"success": False, "message": "Не авторизован"}
-    
-    character_id = data.get('character_id')
-    item_id = data.get('item_id')
-    
-    if not character_id or not item_id:
-        return {"success": False, "message": "Не указаны character_id или item_id"}
-    
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        success = inventory_manager.unequip_item(character, item_id)
-        session.commit()
-        
-        if success:
-            return {'success': True, 'message': 'Предмет снят'}
-        return {"success": False, "message": "Не удалось снять предмет"}
-    except Exception as e:
-        session.rollback()
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
-
-@app.get("/api/inventory/search")
-async def search_items(character_id: int, query: str):
-    """Ищет предметы в инвентаре."""
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        inventory = inventory_manager.get_inventory(character_id)
-        if not inventory:
-            inventory = inventory_manager.load_inventory(character)
-        
-        results = inventory.find_by_name(query)
+        parsed = dice_engine.parse_formula(formula)
         return {
             'success': True,
-            'results': [item.to_dict() for item in results]
+            'parsed': parsed
         }
-    except Exception as e:
+    except ValueError as e:
         return {"success": False, "message": str(e)}
-    finally:
-        session.close()
 
-@app.get("/api/inventory/filter")
-async def filter_items(character_id: int, item_type: str = None, rarity: str = None):
-    """Фильтрует предметы по типу или редкости."""
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        inventory = inventory_manager.get_inventory(character_id)
-        if not inventory:
-            inventory = inventory_manager.load_inventory(character)
-        
-        result = inventory.get_all_items()
-        if item_type:
-            result = [item for item in result if item.type == item_type]
-        if rarity:
-            result = [item for item in result if item.rarity == rarity]
-        
-        return {
-            'success': True,
-            'items': [item.to_dict() for item in result]
-        }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
+@app.get("/api/dice/advantage/{character_id}")
+async def roll_with_advantage(character_id: int, data: dict):
+    """Выполняет бросок с преимуществом."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    # Используем преимущество
+    data['advantage'] = True
+    return await roll_dice(request, data)
 
-@app.get("/api/inventory/equipment/{character_id}")
-async def get_equipment(character_id: int):
-    """Получает экипированные предметы."""
-    session = Session()
-    try:
-        character = session.query(Character).filter_by(id=character_id).first()
-        if not character:
-            return {"success": False, "message": "Персонаж не найден"}
-        
-        inventory = inventory_manager.get_inventory(character_id)
-        if not inventory:
-            inventory = inventory_manager.load_inventory(character)
-        
-        equipped = inventory.get_equipped_items()
-        return {
-            'success': True,
-            'equipment': {slot: item.to_dict() for slot, item in equipped.items()}
-        }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    finally:
-        session.close()
+@app.get("/api/dice/disadvantage/{character_id}")
+async def roll_with_disadvantage(character_id: int, data: dict):
+    """Выполняет бросок с помехой."""
+    user = get_current_user(request)
+    if not user:
+        return {"success": False, "message": "Не авторизован"}
+    
+    # Используем помеху
+    data['disadvantage'] = True
+    return await roll_dice(request, data)
+
+# ============================================================
+# 8. WEBSOCKET HELPER
+# ============================================================
+
+async def broadcast_to_room(room_id: int, message: dict):
+    """Отправляет сообщение всем в комнате."""
+    for ws in connections.get(room_id, []):
+        try:
+            await ws.send_text(json.dumps(message))
+        except:
+            pass
 
 # ============================================================
 # 9. БЫСТРЫЙ СТАРТ
@@ -1170,60 +1108,105 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                         'timestamp': datetime.now().isoformat()
                     })
                 
-                elif msg_type == 'inventory_add':
-                    character_id = msg.get('character_id')
-                    item_data = msg.get('item')
+                elif msg_type == 'dice_roll':
+                    # Бросок кубиков через WebSocket
+                    dice_type = msg.get('dice_type', 'd20')
+                    count = msg.get('count', 1)
+                    modifier = msg.get('modifier', 0)
+                    reason = msg.get('reason', 'Бросок')
+                    visibility = msg.get('visibility', 'public')
+                    character_id = msg.get('character_id', 0)
+                    advantage = msg.get('advantage', False)
+                    disadvantage = msg.get('disadvantage', False)
+                    custom_modifiers = msg.get('custom_modifiers', [])
                     
-                    if character_id and item_data:
-                        session2 = Session()
-                        character = session2.query(Character).filter_by(id=character_id).first()
-                        if character:
-                            success = inventory_manager.add_item(character, item_data)
-                            if success:
-                                session2.commit()
-                                await broadcast_to_room(room.id, {
-                                    'type': 'inventory_updated',
-                                    'character_id': character_id,
-                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
-                                })
-                        session2.close()
+                    try:
+                        visibility_enum = DiceVisibility(visibility)
+                    except ValueError:
+                        visibility_enum = DiceVisibility.PUBLIC
+                    
+                    roll_request = RollRequest(
+                        dice_type=dice_type,
+                        count=count,
+                        modifier=modifier,
+                        reason=reason,
+                        visibility=visibility_enum,
+                        user_id=msg.get('user_id', 0),
+                        character_id=character_id,
+                        room_id=room.id,
+                        advantage=advantage,
+                        disadvantage=disadvantage,
+                        custom_modifiers=custom_modifiers
+                    )
+                    
+                    result = dice_engine.roll(roll_request)
+                    dice_engine.save_history_to_db(result)
+                    
+                    if visibility_enum == DiceVisibility.PUBLIC:
+                        await broadcast_to_room(room.id, {
+                            'type': 'dice_roll',
+                            'result': result.to_dict(),
+                            'animation': result.get_animation_data(),
+                            'dice_animation': dice_engine.generate_dice_animation(result)
+                        })
+                    else:
+                        # Секретный бросок — только GM
+                        gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
+                        if gm:
+                            await websocket.send_text(json.dumps({
+                                'type': 'dice_roll_secret',
+                                'result': result.to_dict(),
+                                'animation': result.get_animation_data()
+                            }))
                 
-                elif msg_type == 'inventory_remove':
-                    character_id = msg.get('character_id')
-                    item_id = msg.get('item_id')
+                elif msg_type == 'dice_formula':
+                    formula = msg.get('formula', '1d20')
+                    modifier = msg.get('modifier', 0)
+                    reason = msg.get('reason', formula)
+                    visibility = msg.get('visibility', 'public')
+                    character_id = msg.get('character_id', 0)
+                    advantage = msg.get('advantage', False)
+                    disadvantage = msg.get('disadvantage', False)
                     
-                    if character_id and item_id:
-                        session2 = Session()
-                        character = session2.query(Character).filter_by(id=character_id).first()
-                        if character:
-                            success = inventory_manager.remove_item(character, item_id)
-                            if success:
-                                session2.commit()
-                                await broadcast_to_room(room.id, {
-                                    'type': 'inventory_updated',
-                                    'character_id': character_id,
-                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
-                                })
-                        session2.close()
-                
-                elif msg_type == 'inventory_equip':
-                    character_id = msg.get('character_id')
-                    item_id = msg.get('item_id')
-                    slot = msg.get('slot')
+                    try:
+                        visibility_enum = DiceVisibility(visibility)
+                    except ValueError:
+                        visibility_enum = DiceVisibility.PUBLIC
                     
-                    if character_id and item_id and slot:
-                        session2 = Session()
-                        character = session2.query(Character).filter_by(id=character_id).first()
-                        if character:
-                            success = inventory_manager.equip_item(character, item_id, slot)
-                            if success:
-                                session2.commit()
-                                await broadcast_to_room(room.id, {
-                                    'type': 'inventory_updated',
-                                    'character_id': character_id,
-                                    'inventory': inventory_manager.get_inventory(character_id).to_dict()
-                                })
-                        session2.close()
+                    try:
+                        result = dice_engine.roll_formula(
+                            formula=formula,
+                            modifier=modifier,
+                            reason=reason,
+                            visibility=visibility_enum,
+                            user_id=msg.get('user_id', 0),
+                            character_id=character_id,
+                            room_id=room.id,
+                            advantage=advantage,
+                            disadvantage=disadvantage
+                        )
+                        
+                        dice_engine.save_history_to_db(result)
+                        
+                        if visibility_enum == DiceVisibility.PUBLIC:
+                            await broadcast_to_room(room.id, {
+                                'type': 'dice_roll',
+                                'result': result.to_dict(),
+                                'animation': result.get_animation_data(),
+                                'dice_animation': dice_engine.generate_dice_animation(result)
+                            })
+                        else:
+                            gm = session.query(RoomPlayer).filter_by(room_id=room.id, role='gm').first()
+                            if gm:
+                                await websocket.send_text(json.dumps({
+                                    'type': 'dice_roll_secret',
+                                    'result': result.to_dict()
+                                }))
+                    except ValueError as e:
+                        await websocket.send_text(json.dumps({
+                            'type': 'error',
+                            'message': f"Ошибка формулы: {str(e)}"
+                        }))
                 
             except json.JSONDecodeError:
                 pass
@@ -1234,14 +1217,6 @@ async def room_websocket(websocket: WebSocket, room_id: str):
                 connections[room.id].remove(websocket)
             if not connections[room.id]:
                 del connections[room.id]
-
-async def broadcast_to_room(room_id: int, message: dict):
-    """Отправляет сообщение всем в комнате."""
-    for ws in connections.get(room_id, []):
-        try:
-            await ws.send_text(json.dumps(message))
-        except:
-            pass
 
 # ============================================================
 # 11. ЗАПУСК
