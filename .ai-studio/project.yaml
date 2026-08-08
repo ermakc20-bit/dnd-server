@@ -1,0 +1,140 @@
+schema_version: 2
+project:
+  id: "dnd-vtt-v2"
+  owners:
+    - "DnD VTT product owner"
+  stack:
+    - "React"
+    - "TypeScript"
+    - "Vite"
+    - "PixiJS"
+    - "FastAPI"
+    - "Pydantic"
+    - "SQLAlchemy async"
+    - "Supabase Auth/Postgres/Storage"
+    - "Redis"
+    - "Docker Compose"
+  risk_class: "critical"
+commands:
+  dev:
+    - "make dev-backend"
+    - "make dev-frontend"
+  build:
+    - "make build"
+  test:
+    - "make test"
+  verify:
+    focused:
+      - "make test-backend"
+      - "make test-frontend"
+    full:
+      - "make verify"
+  e2e:
+    - "make test-e2e"
+  security:
+    - "make security"
+  release:
+    - "make release-check"
+routing:
+  trivial:
+    required_gates:
+      - "authority"
+      - "context"
+      - "build"
+      - "verify"
+      - "learn"
+    required_review_lenses: []
+  standard:
+    required_gates:
+      - "authority"
+      - "context"
+      - "readiness"
+      - "plan"
+      - "build"
+      - "verify"
+      - "review"
+      - "learn"
+    required_review_lenses:
+      - "specification-fidelity"
+      - "engineering"
+  complex:
+    required_gates:
+      - "authority"
+      - "context"
+      - "readiness"
+      - "plan"
+      - "build"
+      - "verify"
+      - "review"
+      - "release"
+      - "learn"
+    required_review_lenses:
+      - "specification-fidelity"
+      - "engineering"
+      - "security"
+      - "product"
+      - "design-accessibility"
+      - "release"
+  autonomous:
+    required_gates:
+      - "authority"
+      - "context"
+      - "readiness"
+      - "plan"
+      - "build"
+      - "verify"
+      - "review"
+      - "release"
+      - "learn"
+    required_review_lenses:
+      - "specification-fidelity"
+      - "engineering"
+      - "security"
+      - "release"
+review:
+  available_lenses:
+    - "specification-fidelity"
+    - "engineering"
+    - "security"
+    - "product"
+    - "design-accessibility"
+    - "developer-experience"
+    - "release"
+release:
+  environments:
+    - "local"
+    - "staging"
+    - "production"
+  monitoring: "Structured logs, health probes, error rate, REST latency, WebSocket connections and command-to-broadcast latency"
+  canary: "Private staging room, then an owner-approved closed playtest before public registration"
+  rollback: "Redeploy the previous immutable image; database changes remain backward-compatible and use forward fixes"
+autonomy:
+  allowed: false
+  repository_allowlist: []
+  concurrency: 1
+  turn_limit: 0
+  retry_limit: 0
+  budget: 0
+  commit: false
+  push: false
+  merge: false
+  deploy: false
+integrations:
+  guarded:
+    - "Supabase"
+    - "SMTP"
+    - "VPS"
+    - "DNS"
+secrets:
+  permitted_sources:
+    - ".env"
+    - "Supabase project settings"
+    - "VPS secret storage"
+    - "CI secret storage"
+  prohibited_outputs:
+    - "credentials"
+    - "JWTs"
+    - "API secret keys"
+    - "cookies"
+    - "signed URLs"
+    - "database dumps"

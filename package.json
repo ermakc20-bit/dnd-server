@@ -1,0 +1,10 @@
+{
+  "name": "dnd-vtt-tooling",
+  "private": true,
+  "scripts": {
+    "supabase": "supabase"
+  },
+  "devDependencies": {
+    "supabase": "2.111.0"
+  }
+}

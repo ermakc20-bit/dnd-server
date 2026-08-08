@@ -1,0 +1,30 @@
+:8080 {
+  encode zstd gzip
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy "default-src 'self'; connect-src 'self' https: wss:; img-src 'self' data: blob: https:; style-src 'self'; script-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+  }
+
+  handle /api/* {
+    reverse_proxy api:8000
+  }
+
+  handle /health/* {
+    reverse_proxy api:8000
+  }
+
+  handle /ws/* {
+    reverse_proxy api:8000
+  }
+
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}
