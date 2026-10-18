@@ -1,6 +1,6 @@
 # DnD VTT: запуск на Windows через WSL2
 
-Инструкция для кодовой версии [`aed9735d2b44a74e17880025e74c381ee8f61fbd`](https://github.com/ermakc20-bit/dnd-server/commit/aed9735d2b44a74e17880025e74c381ee8f61fbd), опубликованной 18 октября 2026 года в [ветке `design`](https://github.com/ermakc20-bit/dnd-server/tree/design). Сама инструкция добавлена отдельным документирующим коммитом; приложение им не изменяется.
+Инструкция для тестовой базы от 18 октября 2026 года в [ветке `main`](https://github.com/ermakc20-bit/dnd-server/tree/main). Принятая кодовая версия приложения — [`aed9735d2b44a74e17880025e74c381ee8f61fbd`](https://github.com/ermakc20-bit/dnd-server/commit/aed9735d2b44a74e17880025e74c381ee8f61fbd); в `main` целиком включена ветка `design` на `13e4d23878b06f0c4b8ec6af6083812a981bd227`, включая Windows-инструкцию. Последующая правка ссылок на `main` приложение не изменяет.
 
 Рекомендуемый первый запуск: **Windows 11 → WSL2 / Ubuntu 24.04 → Docker Desktop для Supabase и Redis; Python API и Vite — в Ubuntu**. Это соответствует Linux-командам `Makefile` и путям `.venv/bin/…`. Нативный PowerShell не исполняет этот Makefile без адаптации. Браузер можно использовать обычный, установленный в Windows.
 
@@ -84,23 +84,17 @@ command -v node
 
 Путь к Node должен быть Linux-путём, обычно внутри `~/.nvm/`, а не `/mnt/c/Program Files/…`. Python и Node, установленные только в Windows, не заменяют Linux-окружение.
 
-## 3. Клонировать `design` и установить зависимости
+## 3. Клонировать `main` и установить зависимости
 
 ```bash
 mkdir -p "$HOME/src"
 cd "$HOME/src"
-git -c core.autocrlf=false clone --branch design --single-branch https://github.com/ermakc20-bit/dnd-server.git
+git -c core.autocrlf=false clone --branch main --single-branch https://github.com/ermakc20-bit/dnd-server.git
 cd dnd-server
 git rev-parse HEAD
 ```
 
-В `design` может быть более новый документирующий коммит. Чтобы зафиксировать именно опубликованную кодовую версию:
-
-```bash
-git switch --detach aed9735d2b44a74e17880025e74c381ee8f61fbd
-```
-
-Это делайте в **новом чистом checkout**. Инструкция добавлена после этого SHA и при таком переключении исчезнет из локального дерева: оставьте открытой её страницу на GitHub. Для разработки актуальной ветки вместо detached-среза оставайтесь на `design`.
+Для текущего раунда тестирования оставайтесь на `main`. Сохраните полный SHA из вывода `git rev-parse HEAD` вместе с отчётом об ошибке: он фиксирует проверенный срез, даже если позднее ветка продолжит развиваться. Код приложения в этой тестовой базе совпадает с `aed9735`; более поздние коммиты, описанные выше, добавляют документацию. Переключаться на старую ветку `master` или на detached-срез без инструкции для обычного запуска не требуется.
 
 Установка из корня проекта:
 
