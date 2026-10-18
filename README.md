@@ -12,6 +12,9 @@ React использует Auth и разрешённые private Storage flows,
 Developer OS — спецификации/ADR/evidence/checks; legacy development/design
 prototypes не активируются и не маршрутизируют работу.
 
+Для другого ПК с Windows: [пошаговый запуск через WSL2 и Docker Desktop](docs/runbooks/windows-setup.md).
+Инструкция привязана к опубликованной кодовой версии и отдельно указывает непроверенные Windows-шаги.
+
 ## Локальная установка
 
 Нужны Python 3.13–3.14, Node 22+, Docker-compatible runtime. Из чистого checkout:
