@@ -246,7 +246,9 @@ async def test_full_state_roundtrip_retains_usable_ownership_and_independent_res
     room = await transfer.connection.fetchval(
         "select id from app.rooms where campaign_id=$1", campaign
     )
-    repository = PostgresCampaignRepository(str(transfer.service.repository.engine.url))
+    repository = PostgresCampaignRepository(
+        transfer.service.repository.engine.url.render_as_string(hide_password=False)
+    )
     try:
         transfer.actor = await repository.resolve_registered(transfer.gm.user_id, room)
     finally:
@@ -410,7 +412,9 @@ async def test_imported_history_remains_readable_and_filtered_without_undo(trans
     room = await transfer.connection.fetchval(
         "select id from app.rooms where campaign_id=$1", campaign
     )
-    repository = PostgresCampaignRepository(str(transfer.service.repository.engine.url))
+    repository = PostgresCampaignRepository(
+        transfer.service.repository.engine.url.render_as_string(hide_password=False)
+    )
     try:
         transfer.actor = await repository.resolve_registered(transfer.gm.user_id, room)
     finally:
@@ -629,7 +633,9 @@ async def test_compensated_lifecycle_exports_active_state_and_safe_revoked_dice(
         "select id from app.rooms where campaign_id=$1", UUID(result["result_campaign_id"])
     )
     campaigns = PostgresCampaignRepository(
-        str(transfer.service.repository.engine.url).replace("postgresql+asyncpg", "postgresql")
+        transfer.service.repository.engine.url.render_as_string(hide_password=False).replace(
+            "postgresql+asyncpg", "postgresql"
+        )
     )
     try:
         actor = await campaigns.resolve_registered(transfer.gm.user_id, room)

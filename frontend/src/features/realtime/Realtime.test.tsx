@@ -68,21 +68,22 @@ it("keeps the last snapshot read-only after disconnect and clears it on revoke",
   expect(ws.url).not.toContain("ticket");
   act(() => ws.onopen?.());
   act(() => ws.onmessage?.({ data: JSON.stringify({ type: "sync", snapshot, events: [] }) }));
-  expect(await screen.findByText("Версия 3 · объектов 0")).toBeInTheDocument();
+  expect(await screen.findByText("0 объектов")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Сцена" }));
   act(() => ws.onclose?.({ code: 1006 }));
   expect(screen.getByText("Только чтение · последнее подтверждённое состояние")).toBeInTheDocument();
-  expect(screen.getByText(/Последняя синхронизация/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Нет связи")).toHaveAttribute("title", expect.stringContaining("Последняя синхронизация:"));
   expect(screen.getByRole("button", { name: "Создать сцену" })).toBeDisabled();
-  expect(screen.getByText("Версия 3 · объектов 0")).toBeInTheDocument();
+  expect(screen.getByText("0 объектов")).toBeInTheDocument();
   await waitFor(() => expect(Socket.instances).toHaveLength(2));
   act(() => Socket.instances[1].onopen?.());
   expect(screen.getByRole("button", { name: "Создать сцену" })).toBeDisabled();
   act(() => Socket.instances[1].onmessage?.({ data: JSON.stringify({ type: "sync",
     snapshot: { ...snapshot, aggregate_version: 4, event_cursor: 4 }, events: [] }) }));
-  expect(screen.getByText("Версия 4 · объектов 0")).toBeInTheDocument();
+  expect(screen.getByText("0 объектов")).toBeInTheDocument();
   expect(screen.queryByText("Только чтение · последнее подтверждённое состояние")).not.toBeInTheDocument();
   act(() => Socket.instances[1].onclose?.({ code: 4403 }));
-  expect(screen.queryByText("Версия 4 · объектов 0")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 объектов")).not.toBeInTheDocument();
   expect(screen.getByRole("alert")).toHaveTextContent("Доступ к комнате отозван");
 });
 
@@ -103,6 +104,7 @@ it("automatically recovers after more than ten failed attempts and stays read-on
     const first = Socket.instances[0];
     act(() => first.onopen?.());
     act(() => first.onmessage?.({ data: JSON.stringify({ type: "sync", snapshot, events: [] }) }));
+    fireEvent.click(screen.getByRole("button", { name: "Сцена" }));
     fireEvent.change(screen.getByLabelText("Название сцены"), { target: { value: "Следующая сцена" } });
     expect(screen.getByRole("button", { name: "Создать сцену" })).toBeEnabled();
 
@@ -110,7 +112,7 @@ it("automatically recovers after more than ten failed attempts and stays read-on
     act(() => first.onclose?.({ code: 1006 }));
     await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
     expect(request.mock.calls.length).toBeGreaterThan(12);
-    expect(screen.getByText("Версия 3 · объектов 0")).toBeInTheDocument();
+    expect(screen.getByText("0 объектов")).toBeInTheDocument();
     expect(screen.getByText("Только чтение · последнее подтверждённое состояние")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Создать сцену" })).toBeDisabled();
     expect(Socket.instances).toHaveLength(1);
@@ -125,7 +127,7 @@ it("automatically recovers after more than ten failed attempts and stays read-on
       ticket: "single-use-ticket", cursor: 3 }));
     act(() => recovered.onmessage?.({ data: JSON.stringify({ type: "sync",
       snapshot: { ...snapshot, aggregate_version: 4, event_cursor: 4 }, events: [] }) }));
-    expect(screen.getByText("Версия 4 · объектов 0")).toBeInTheDocument();
+    expect(screen.getByText("0 объектов")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Создать сцену" })).toBeEnabled();
     expect(api.command).not.toHaveBeenCalled();
 
@@ -134,6 +136,6 @@ it("automatically recovers after more than ten failed attempts and stays read-on
     await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
     expect(request).toHaveBeenCalledTimes(attemptsAtRevoke);
     expect(screen.getByRole("alert")).toHaveTextContent("Доступ к комнате отозван");
-    expect(screen.queryByText("Версия 4 · объектов 0")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 объектов")).not.toBeInTheDocument();
   } finally { view.unmount(); }
 });

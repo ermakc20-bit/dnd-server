@@ -3,14 +3,14 @@ const fs=require('node:fs'); const path=require('node:path'); const assert=requi
 const {chromium}=require(process.env.VTT_PLAYWRIGHT_MODULE || 'playwright');
 const base=process.env.VTT_E2E_URL || 'http://127.0.0.1:5190'; const output=process.env.VTT_E2E_OUTPUT;
 assert.ok(['localhost','127.0.0.1'].includes(new URL(base).hostname));
-let stage='launch'; const errors=[];
-const connected=page=>page.getByText(/Последняя синхронизация:.*Связь установлена/).waitFor({timeout:15000});
+let stage='launch'; const errors=[]; let gmPage;
+const connected=page=>page.getByLabel('Связь установлена',{exact:true}).waitFor({timeout:15000});
 const until=async(page,check)=>{for(let index=0;index<150;index++){if(await check())return;await page.waitForTimeout(100);}throw new Error('Public read-back timeout');};
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.VTT_CHROME_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
  try {
   const gmContext=await browser.newContext({viewport:{width:1440,height:900}});
-  const gm=await gmContext.newPage();gm.on('pageerror',error=>errors.push(error.name));
+  const gm=await gmContext.newPage();gmPage=gm;gm.on('pageerror',error=>errors.push(error.name));
   const gmToken=(await (await gm.request.get(base+'/__e2e/bootstrap')).json()).token;
   const headers={Authorization:'Bearer '+gmToken};
   stage='native campaign';await gm.goto(base);
@@ -20,6 +20,7 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
   const roomPath=new URL(gm.url()).pathname;const room=roomPath.split('/').pop();const route='/api/v1/rooms/'+room;
   const snapshot=async(page)=>{const response=await page.request.get(base+route+'/scene',page===gm?{headers}:{});assert.equal(response.status(),200);return response.json();};
   stage='map and template';
+  await gm.getByRole('button',{name:'Сцена',exact:true}).click();
   await gm.getByLabel('Название сцены',{exact:true}).fill('Synthetic scene');
   await gm.getByRole('button',{name:'Создать сцену',exact:true}).click();await until(gm,async()=>!!(await snapshot(gm)).scene);
   await gm.getByLabel('Файл изображения',{exact:true}).setInputFiles(path.join(output,'ready-map.png'));
@@ -47,6 +48,7 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
   await gm.getByRole('button',{name:'Карточки',exact:true}).click();
   await gm.getByRole('button',{name:/Герой теста/}).click();
   await gm.getByRole('button',{name:'Редактировать карточку',exact:true}).click();
+  await gm.getByText('Игровой пакет и доступ',{exact:true}).click();
   await gm.getByRole('button',{name:'Обновить участников',exact:true}).click();
   await gm.getByLabel(/^Назначить карточку/).selectOption({label:'Synthetic guest'});
   await gm.getByRole('button',{name:'Сохранить карточку',exact:true}).click();
@@ -59,6 +61,7 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
   await until(player,async()=>(await snapshot(player)).items.some(entry=>entry.id===item.id&&entry.can_transform&&entry.x===128));
   stage='authorized native token control'; let tokenCommands=0;
   player.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/scene/commands')&&request.postDataJSON()?.type==='item.update')tokenCommands++;});
+  await player.getByRole('button',{name:'Сцена',exact:true}).tap();
   await player.getByLabel(/^Выбранный объект/).selectOption(item.id);
   await until(player,async()=>!(await player.getByRole('button',{name:'Сохранить трансформацию',exact:true}).isDisabled()));
   await player.getByLabel('X',{exact:true}).fill('192');
@@ -92,6 +95,7 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
   assert.equal((await cards(player)).cards[0].resources[0].current,7);
   stage='native export and import';
   await gm.getByRole('button',{name:'К кампаниям',exact:true}).click();
+  await gm.getByText('Настройки и перенос',{exact:true}).first().click();
   const exportPanel=gm.getByRole('region',{name:'Экспорт кампании',exact:true}).first();
   await exportPanel.getByRole('button',{name:'Экспорт кампании',exact:true}).click();
   await exportPanel.getByLabel('Добавить последние 1000 событий',{exact:true}).check();
@@ -145,8 +149,10 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
    page.on('request',listener);
    const activate=async locator=>touch?locator.tap():locator.click();
    const openCard=async()=>{
-    await activate(page.getByRole('button',{name:'Карточки',exact:true}));
-    await activate(page.locator('.card-list').getByRole('button',{name:/Герой теста/}));
+    const cardsTab=page.getByRole('button',{name:'Карточки',exact:true});
+    if(await cardsTab.getAttribute('aria-pressed')!=='true')await activate(cardsTab);
+    if(!await page.getByRole('article',{name:'Карточка Герой теста',exact:true}).isVisible())
+     await activate(page.locator('.card-list').getByRole('button',{name:/Герой теста/}));
    };
    const session=touch?await page.context().newCDPSession(page):null;
    const place=async(box,start,end)=>{
@@ -190,12 +196,13 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
     f7Cases.push({device:touch?'touch':'desktop',origin:ability.geometry.origin,shape:ability.geometry.shape,actions,
      commands_before_confirm:0,commands_after_confirm:1,public_geometry_readback:true,source_coordinates_unchanged:true});
    }
+   // Place the second gesture on exposed canvas, clear of the bottom-left controls.
    for(const ability of f7Abilities.filter(entry=>entry.geometry.origin==='point')) {
     stage=`F7 ${touch?'touch':'desktop'} move draft ${ability.geometry.shape}`;
     await openCard();const before=await snapshot(page),commandsBefore=sent.length;
     await activate(page.getByRole('button',{name:`Показать область: ${ability.name}`,exact:true}));
     const host=page.getByRole('region',{name:'Карта и токены',exact:true});await host.scrollIntoViewIfNeeded();const bounds=await host.boundingBox();
-    const directed=['cone','line','cube'].includes(ability.geometry.shape),finalOrigin={x:320,y:256},finalDirection={x:320,y:128};
+    const directed=['cone','line','cube'].includes(ability.geometry.shape),finalOrigin={x:600,y:256},finalDirection={x:600,y:128};
     await place(bounds,{x:180,y:180},directed?{x:560,y:220}:{x:180,y:180});
     await place(bounds,finalOrigin,directed?finalDirection:finalOrigin);assert.equal(sent.length,commandsBefore);
     await activate(page.getByRole('button',{name:'Показать способность',exact:true}));
@@ -230,5 +237,8 @@ const until=async(page,check)=>{for(let index=0;index<150;index++){if(await chec
   result.native_paths.push('F7 explicit source/point gesture/confirm desktop+touch');
   result.f7_ability_launch_cases=f7Cases.length;result.f7_maximum_launch_actions=Math.max(...f7Cases.map(entry=>entry.actions));
   fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ } catch(error) {
+  if(gmPage&&!gmPage.isClosed())await gmPage.screenshot({path:path.join(output,'failure-desktop.png')}).catch(()=>{});
+  throw error;
  } finally {await browser.close();}
-})().catch(error=>{fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({status:'failed',kind:error.name,stage,at:error.stack?.split('\n').find(line=>line.includes('browser.cjs:'))?.trim(),page_errors:errors}));console.error('Native browser acceptance failed:',error.name,stage);process.exit(1);});
+})().catch(error=>{fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({status:'failed',kind:error.name,message:error.message,stage,at:error.stack?.split('\n').find(line=>line.includes('browser.cjs:'))?.trim(),page_errors:errors}));console.error('Native browser acceptance failed:',error.name,stage);process.exit(1);});

@@ -33,7 +33,9 @@ async def transfer(table):
     table.storage = MemoryStorage()
     table.transfer_service = TransferService(table.service.repository.engine, table.storage)
     application.dependency_overrides[get_transfer_service] = lambda: table.transfer_service
-    table.asset_service = AssetService(str(table.service.repository.engine.url), table.storage)
+    table.asset_service = AssetService(
+        table.service.repository.engine.url.render_as_string(hide_password=False), table.storage
+    )
     application.dependency_overrides[get_asset_service] = lambda: table.asset_service
     try:
         yield table

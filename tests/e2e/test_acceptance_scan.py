@@ -96,3 +96,25 @@ def test_scanner_keeps_genuine_binary_png_control(tmp_path):
     root = root_fixture(tmp_path)
     Image.new("RGB", (2, 2), (20, 30, 40)).save(root / "frontend" / "dist" / "map.png")
     assert run_scan(root).returncode == 0
+
+
+def test_scanner_accepts_exact_bundled_design_fonts(tmp_path):
+    root = root_fixture(tmp_path)
+    fonts = root / "frontend" / "dist" / "fonts"
+    fonts.mkdir()
+    for source in (SCANNER.parents[1] / "frontend" / "public" / "fonts").glob("*.ttf"):
+        (fonts / source.name).write_bytes(source.read_bytes())
+    assert len(list(fonts.iterdir())) == 2
+    assert run_scan(root).returncode == 0
+
+
+def test_scanner_rejects_modified_font_without_echoing_canary(tmp_path):
+    root = root_fixture(tmp_path)
+    fonts = root / "frontend" / "dist" / "fonts"
+    fonts.mkdir()
+    source = SCANNER.parents[1] / "frontend" / "public" / "fonts" / "Onest-variable.ttf"
+    canary = "sb_" + "secret_" + "fontCanary" * 4
+    (fonts / source.name).write_bytes(source.read_bytes() + canary.encode())
+    result = run_scan(root)
+    assert result.returncode == 2
+    assert canary not in result.stdout + result.stderr

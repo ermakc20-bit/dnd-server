@@ -4,6 +4,7 @@ import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -28,8 +29,12 @@ from fastapi.testclient import TestClient
 def security_table(monkeypatch):
     database = os.environ["VTT_TEST_DATABASE_URL"]
     redis_url = os.environ["VTT_TEST_REDIS_URL"]
-    assert database == "postgresql://postgres@127.0.0.1:55439/vtt_ticket01"
-    assert redis_url == "redis://127.0.0.1:56439/15"
+    destination, cache = urlparse(database), urlparse(redis_url)
+    assert destination.scheme == "postgresql"
+    assert destination.hostname in {"localhost", "127.0.0.1"}
+    assert destination.username == "postgres" and destination.path == "/vtt_ticket01"
+    assert cache.scheme == "redis"
+    assert cache.hostname in {"localhost", "127.0.0.1"} and cache.path == "/15"
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     verifier = SupabaseJWTVerifier(
         issuer="http://fixture.invalid/auth/v1",

@@ -151,7 +151,9 @@ async def test_lifecycle_undo_rejects_unsafe_or_unauthorized_commands(table, sce
             table.gm.user_id,
         )
         campaigns = PostgresCampaignRepository(
-            str(table.service.repository.engine.url).replace("postgresql+asyncpg", "postgresql")
+            table.service.repository.engine.url.render_as_string(hide_password=False).replace(
+                "postgresql+asyncpg", "postgresql"
+            )
         )
         try:
             other = await campaigns.resolve_registered(table.gm.user_id, room)
@@ -452,7 +454,9 @@ async def test_inactive_scene_rename_compensation_preserves_active_pointer_and_h
                 table.gm.user_id,
             )
             campaigns = PostgresCampaignRepository(
-                str(table.service.repository.engine.url).replace("postgresql+asyncpg", "postgresql")
+                table.service.repository.engine.url.render_as_string(hide_password=False).replace(
+                    "postgresql+asyncpg", "postgresql"
+                )
             )
             other = await campaigns.resolve_registered(table.gm.user_id, other_room)
             projection = await table.service.repository.get_projection(other, other_room)
@@ -629,7 +633,9 @@ async def test_inactive_scene_rename_undo_retains_reference_and_newer_state_guar
                 table.gm.user_id,
             )
             campaigns = PostgresCampaignRepository(
-                str(table.service.repository.engine.url).replace("postgresql+asyncpg", "postgresql")
+                table.service.repository.engine.url.render_as_string(hide_password=False).replace(
+                    "postgresql+asyncpg", "postgresql"
+                )
             )
             other = await campaigns.resolve_registered(table.gm.user_id, room)
 

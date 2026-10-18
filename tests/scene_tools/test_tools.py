@@ -229,7 +229,9 @@ values($1,$2,$3,$4,'Token','image',$5,'image/png',10,'ready')
     assert denied.error_code == "forbidden", denied
     storage = MemoryStorage()
     service = AssetService(
-        str(table.service.repository.engine.url).replace("postgresql+asyncpg", "postgresql"),
+        table.service.repository.engine.url.render_as_string(hide_password=False).replace(
+            "postgresql+asyncpg", "postgresql"
+        ),
         storage,
     )
     from app.scenes.models import SceneFailure

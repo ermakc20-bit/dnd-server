@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -18,6 +19,12 @@ MAX_FILE = 20 * 1024 * 1024
 MAX_TOTAL = 100 * 1024 * 1024
 MAX_FILES = 10000
 BINARY_IMAGES = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP", ".avif": "AVIF"}
+# These two reviewed, bundled design assets are binary. Fail closed for changed
+# fonts instead of treating arbitrary .ttf files as safe or decoding them as text.
+BUNDLED_FONTS = {
+    "Onest-variable.ttf": "966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31",
+    "Unbounded-variable.ttf": "323b511be380c8d474ef030686b71aedde501f8d9cd46da558b7c40454372c3f",
+}
 AI_PACKAGES = {
     "openai",
     "anthropic",
@@ -88,6 +95,13 @@ def scan(root: Path, logs: list[Path]) -> dict[str, Any]:
         if size > MAX_FILE or total > MAX_TOTAL:
             raise ValueError("byte bound exceeded")
         data = path.read_bytes()
+        if path.suffix.lower() == ".ttf":
+            if (
+                path.parent != build / "fonts"
+                or hashlib.sha256(data).hexdigest() != BUNDLED_FONTS.get(path.name)
+            ):
+                raise ValueError("unreviewed binary font")
+            continue
         if path.suffix.lower() in BINARY_IMAGES:
             try:
                 with Image.open(BytesIO(data)) as asset:
