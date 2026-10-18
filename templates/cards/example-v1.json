@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "cards": [
+    {
+      "external_key": "guard",
+      "name": "Страж",
+      "kind": "mob",
+      "count": 2,
+      "create_token": false,
+      "visibility": "gm_only",
+      "resources": [{"key": "hp", "label": "Здоровье", "current": 12, "max": 12}]
+    },
+    {"external_key": "torch", "name": "Факел", "kind": "object"}
+  ]
+}

@@ -10,7 +10,7 @@ RUN groupadd --system vtt && useradd --system --gid vtt --home-dir /srv/app vtt
 
 COPY pyproject.toml README.md ./
 COPY backend ./backend
-RUN python -m pip install --upgrade pip && python -m pip install .
+RUN python -m pip install "pip==26.2" && python -m pip install .
 
 USER vtt
 EXPOSE 8000

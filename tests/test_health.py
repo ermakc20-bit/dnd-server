@@ -21,8 +21,8 @@ def test_readiness_is_lenient_locally(client: TestClient) -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_readiness_blocks_unconfigured_production() -> None:
-    settings = Settings(environment="production")
+def test_readiness_blocks_unconfigured_production(settings: Settings) -> None:
+    settings = settings.model_copy(update={"environment": "production"})
     application = create_app(settings)
     application.dependency_overrides[get_settings] = lambda: settings
 

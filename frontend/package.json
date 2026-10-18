@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "overrides": {
+    "@xmldom/xmldom": "0.8.15"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

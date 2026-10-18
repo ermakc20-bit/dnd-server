@@ -7,8 +7,7 @@ export function VttShell({ userLabel }: { userLabel: string }) {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <span className="brand-mark">D20</span>
-          <strong>DnD VTT</strong>
+          <strong>Игровой стол</strong>
         </div>
         <div className="room-state">
           <span className="room-state__dot" />

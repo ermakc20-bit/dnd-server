@@ -12,21 +12,30 @@ dependencies = [
   "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
+  "Pillow==12.3.0",
+  "openpyxl==3.1.5",
+  "python-docx==1.2.0",
+  "pypdf==6.20.0",
+  "defusedxml==0.7.1",
+  "et-xmlfile==2.0.0",
+  "lxml==6.1.0",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
-  "pyjwt[crypto]>=2.10,<3",
+  "pyjwt[crypto]==2.15.1",
   "redis>=5.2,<7",
-  "sqlalchemy>=2.0.36,<3",
+  "sqlalchemy[asyncio]>=2.0.36,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "urllib3==2.8.0",
   "mypy>=1.14,<2",
   "pip-audit>=2.8,<3",
   "pytest>=8.3,<10",
   "pytest-asyncio>=0.25,<2",
   "pytest-cov>=6,<8",
+  "PyYAML>=6.0,<7",
   "ruff>=0.9,<1",
 ]
 
@@ -49,6 +58,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/app/card_import/*.py" = ["RUF001"] # Intentional Russian field labels and UI text.
 
 [tool.mypy]
 python_version = "3.13"

@@ -1,0 +1,11 @@
+begin;
+select plan(7);
+select has_table('app','ability_presentations','confirmed presentations are durable');
+select has_column('app','ability_presentations','geometry','world geometry retained');
+select ok((select relrowsecurity from pg_class where oid='app.ability_presentations'::regclass),'presentations RLS');
+select ok(not has_table_privilege('authenticated','app.ability_presentations','insert'),'browser cannot forge presentation');
+select ok(not has_table_privilege('anon','app.ability_presentations','select'),'anon cannot read presentation');
+select ok((select condeferrable and condeferred from pg_constraint where conname='ability_presentations_owner_participant_id_campaign_id_fkey'),'cascade safe owner FK');
+select has_index('app','ability_presentations','ability_presentations_scene_id_owner_participant_id_key','one current area per actor and scene');
+select * from finish();
+rollback;

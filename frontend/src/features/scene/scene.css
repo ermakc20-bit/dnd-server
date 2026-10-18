@@ -1,0 +1,18 @@
+.scene-page { padding: 24px; min-height: 100dvh; color: var(--text); background: var(--bg); }
+.scene-page button { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); background: var(--surface-raised); font: inherit; font-size: 13px; cursor: pointer; }
+.scene-page button:hover:not(:disabled) { background: var(--accent-soft); }
+.scene-page button[type="submit"] { color: var(--accent-ink); background: var(--accent); border-color: transparent; font-weight: 550; }
+.scene-page button[type="submit"]:hover:not(:disabled) { background: var(--accent-hover); }
+.scene-page button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.scene-header, .scene-actions, .scene-stage-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.scene-stage { min-width: 0; overflow: hidden; }
+.scene-map-area { position: relative; }
+.scene-canvas { width: 100%; min-height: 400px; position: relative; touch-action: none; outline-offset: -3px; overflow: hidden; }
+.scene-canvas canvas { display: block; }
+.scene-viewport-tools { position: absolute; display: flex; align-items: center; background: var(--surface); }
+.scene-sidebar label, .scene-form { display: grid; gap: 8px; }
+.scene-form h3 { font-size: 14px; }
+.scene-form p { font-size: 12px; color: var(--muted); }
+.scene-checkbox { display: flex !important; align-items: center; }
+.scene-error { color: var(--danger); background: var(--danger-soft) !important; }
+.scene-empty { display: grid; place-items: center; text-align: center; }

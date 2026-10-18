@@ -1,0 +1,827 @@
+{
+  "schema_version": 1,
+  "overview": [
+    {
+      "id": "yashka-brosok",
+      "type": "hero",
+      "name": "Яшка-Бросок",
+      "subtitle": "Ловкач, дальний боец, отвлекающий маневрист",
+      "sigil": "Я",
+      "stats": {
+        "ХП": "30",
+        "КЗ": "14",
+        "Скорость": "9 м",
+        "Бонус": "+2"
+      },
+      "attrs": [
+        "Сил +0",
+        "Лов +4",
+        "Тел +1",
+        "Инт +1",
+        "Муд +0",
+        "Хар +2"
+      ],
+      "role": "Срывает внимание, работает с толпой, быстро достает улики и добивает слабые цели.",
+      "actions": [
+        [
+          "Веер стали",
+          "Атака до трех целей в пределах 12 м, отдельный бросок по каждой."
+        ],
+        [
+          "Кувырок циркача",
+          "Реакция: +5 к КЗ против атаки; при промахе может отступить на 3 м."
+        ],
+        [
+          "Смех против страха",
+          "Дает союзнику преимущество на Харизму, Мудрость или спасбросок против страха."
+        ],
+        [
+          "Ульта: Смерть под аплодисменты",
+          "1 раз за игру: атака с 3к20, при попадании крит и спасбросок Телосложения Сл 14 против оглушения."
+        ]
+      ],
+      "scenes": [
+        "площадь",
+        "Сом",
+        "Зазеркалье",
+        "суд"
+      ]
+    },
+    {
+      "id": "malasha-inokop",
+      "type": "hero",
+      "name": "Малаша-Инокопь",
+      "subtitle": "Инженер, сапер, стрелок, мастер ловушек",
+      "sigil": "М",
+      "stats": {
+        "ХП": "30",
+        "КЗ": "14",
+        "Скорость": "9 м",
+        "Бонус": "+2"
+      },
+      "attrs": [
+        "Сил +0",
+        "Лов +3",
+        "Тел +1",
+        "Инт +3",
+        "Муд +1",
+        "Хар +0"
+      ],
+      "role": "Доказывает подделку пломб, вскрывает механизмы, ставит контроль на поле боя.",
+      "actions": [
+        [
+          "Град шпилек",
+          "Залп из трех болтов по одной цели, атака +5, урон 3к4 колющего."
+        ],
+        [
+          "Силок на тварь",
+          "Реакция: цель делает Ловкость Сл 13, при провале скорость 0 и опутана."
+        ],
+        [
+          "Рука мастера",
+          "Преимущество на проверку механизмов, замков, пломб, ловушек или конструкций."
+        ],
+        [
+          "Ульта: Паучье гнездо",
+          "Радиус 6 м: враги Ловкость Сл 14, провал 2к6 режущего, скорость вдвое ниже, зона труднопроходимая."
+        ]
+      ],
+      "scenes": [
+        "дом Семена",
+        "пломбы",
+        "архив",
+        "суд"
+      ]
+    },
+    {
+      "id": "agafya-travnitsa",
+      "type": "hero",
+      "name": "Агафья-Травница",
+      "subtitle": "Алхимик, целитель, эксперт по ядам и мороку",
+      "sigil": "А",
+      "stats": {
+        "ХП": "30",
+        "КЗ": "13",
+        "Скорость": "9 м",
+        "Бонус": "+2"
+      },
+      "attrs": [
+        "Сил -1",
+        "Лов +1",
+        "Тел +0",
+        "Инт +4",
+        "Муд +3",
+        "Хар +0"
+      ],
+      "role": "Доказывает физические признаки подавленной воли, лечит и тушит последствия боя.",
+      "actions": [
+        [
+          "Гремучая смесь",
+          "Точка в пределах 12 м, радиус 3 м, Ловкость Сл 14; провал 3к6 огнем, успех половина."
+        ],
+        [
+          "Настой живучести",
+          "Стабилизирует умирающего до 1 ХП или лечит живого союзника на 2к8+4."
+        ],
+        [
+          "Чистое заключение",
+          "Преимущество на Медицину, Природу, Расследование или Интеллект по следам тела, крови, пыли, зерна, яда и морока."
+        ],
+        [
+          "Ульта: Пробуждение прародителя",
+          "Нежить, духи и зеркальные сущности в конусе 9 м: Мудрость Сл 15, провал бегство и уязвимость ко всем видам урона на 1 минуту."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "дом Семена",
+        "архив",
+        "суд"
+      ]
+    },
+    {
+      "id": "varfolomei-molchalnik",
+      "type": "hero",
+      "name": "Брат Варфоломей-Молчальник",
+      "subtitle": "Духовник, щит от страха, морока и иллюзий",
+      "sigil": "В",
+      "stats": {
+        "ХП": "30",
+        "КЗ": "14",
+        "Скорость": "9 м",
+        "Бонус": "+2"
+      },
+      "attrs": [
+        "Сил +0",
+        "Лов +0",
+        "Тел +2",
+        "Инт +1",
+        "Муд +4",
+        "Хар +1"
+      ],
+      "role": "Держит группу против Зазеркалья, объясняет морок суду без паники.",
+      "actions": [
+        [
+          "Слово Отречения",
+          "Дальняя атака 18 м, +6, урон 2к6 психического; снимает очарование, страх или иллюзию с цели."
+        ],
+        [
+          "Круг Безмолвия",
+          "Радиус 1.5 м: союзники с преимуществом на Мудрость и Харизму; нежить/духи Мудрость Сл 15 для входа."
+        ],
+        [
+          "Точка тишины",
+          "Преимущество на Религию, Мудрость или Проницательность против морока, страха и отражений."
+        ],
+        [
+          "Ульта: Пробуждение Отсвета",
+          "Союзники в радиусе 9 м прекращают страх, сон, очарование и иллюзии; получают сопротивление некротике и +1к4 лучевого по нежити/духам."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "Зазеркалье",
+        "сердце зеркала",
+        "суд"
+      ]
+    },
+    {
+      "id": "saveliy-glukhoy-kolokol",
+      "type": "hero",
+      "name": "Савелий \"Глухой Колокол\"",
+      "subtitle": "Танк, бывший тюремный десятник, защитник проходов",
+      "sigil": "С",
+      "stats": {
+        "ХП": "36",
+        "КЗ": "16",
+        "Скорость": "9 м",
+        "Бонус": "+2"
+      },
+      "attrs": [
+        "Сил +3",
+        "Лов +0",
+        "Тел +3",
+        "Инт +0",
+        "Муд +2",
+        "Хар +1"
+      ],
+      "role": "Держит узкие места, ломает ложные признания и защищает Тихона.",
+      "actions": [
+        [
+          "Тюремный удар",
+          "Атака +5, урон 1к8+3 дробящий; при попадании цель Сила Сл 13, провал: оттолкнута на 3 м или сбита с ног."
+        ],
+        [
+          "Закрыть проход",
+          "До начала следующего хода враги в пределах 1.5 м получают помеху на атаки не по Савелию; один союзник рядом +2 КЗ."
+        ],
+        [
+          "Железный окрик",
+          "Одна гуманоидная цель в 9 м: Мудрость Сл 13, провал - помеха на первую атаку следующего хода."
+        ],
+        [
+          "Ульта: Глухой колокол",
+          "Радиус 9 м: снимает испуг, дает временные 1к8+3 ХП, преимущество на Силу/Телосложение/Мудрость до конца следующего раунда."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "подземелье",
+        "лестница",
+        "суд"
+      ]
+    },
+    {
+      "id": "tikhon-zharok",
+      "type": "npc",
+      "name": "Тихон Жарок",
+      "subtitle": "Подсудимый гончар, орудие морока",
+      "sigil": "Т",
+      "stats": {
+        "Роль": "подсудимый",
+        "Сцена": "тюрьма/суд",
+        "Доверие": "+1",
+        "Риск": "петля"
+      },
+      "role": "Удар нанесла его рука, но воля была сломана. Главная задача группы - доказать это суду.",
+      "actions": [
+        [
+          "Ключевая реплика",
+          "«Рука моя была. Мысль моя - нет»."
+        ],
+        [
+          "Улика",
+          "Ложное признание, голос Настасьи, признаки подавленной воли."
+        ],
+        [
+          "Проверки",
+          "Медицина Сл 12, Проницательность Сл 13, Мудрость/Религия Сл 13."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "суд",
+        "зеркало"
+      ]
+    },
+    {
+      "id": "ostapiy-krivets",
+      "type": "npc",
+      "name": "Остапий Кривец",
+      "subtitle": "Помощник воеводы, интриган, бумажная власть",
+      "sigil": "О",
+      "hp": 32,
+      "ac": 13,
+      "stats": {
+        "ХП": "32",
+        "КЗ": "13",
+        "Скорость": "9 м",
+        "Сл": "13"
+      },
+      "role": "Главный злодей. Ведет зерновую схему, использует Судное Зеркало и пытается уничтожить улики.",
+      "actions": [
+        [
+          "Кинжал",
+          "+4 к попаданию, 1к6+2."
+        ],
+        [
+          "Бумага суда",
+          "Пытается уничтожить улику; реакция героя Ловкость/Расследование Сл 13."
+        ],
+        [
+          "Приказной голос",
+          "Мудрость Сл 13, провал - цель не может атаковать Остапия до конца следующего хода."
+        ],
+        [
+          "К боковой двери",
+          "При половине ХП или доверии 5+ пытается уйти."
+        ]
+      ],
+      "scenes": [
+        "площадь",
+        "архив",
+        "суд"
+      ]
+    },
+    {
+      "id": "voevoda-vorontsov",
+      "type": "npc",
+      "name": "Воевода Григорий Воронцов",
+      "subtitle": "Старая власть, суровый и уставший судья",
+      "sigil": "Г",
+      "stats": {
+        "Роль": "судья",
+        "Сцена": "площадь/суд",
+        "Доверие": "0-6",
+        "Ключ": "порядок"
+      },
+      "role": "Не вор, но слеп к махинациям Остапия. Его можно развернуть к правде через вещь, свидетеля и объяснение.",
+      "actions": [
+        [
+          "Если нет доказательств",
+          "«Слова ваши темные. Суду свет нужен»."
+        ],
+        [
+          "Если есть книга",
+          "«Остапий. Почему я этих чисел не видел?»"
+        ],
+        [
+          "При доверии 5+",
+          "Приказывает снять цепи с Тихона и закрыть двери."
+        ]
+      ],
+      "scenes": [
+        "ратуша",
+        "суд"
+      ]
+    },
+    {
+      "id": "lavrentiy-som",
+      "type": "npc",
+      "name": "Лаврентий Сом",
+      "subtitle": "Купец-посредник зерновой схемы",
+      "sigil": "Л",
+      "stats": {
+        "Роль": "свидетель",
+        "Сцена": "склад",
+        "Сл": "13/14",
+        "Риск": "сбежит"
+      },
+      "role": "Знает про отдельные знаки на мешках и вторую книгу. Боится Остапия больше воеводы.",
+      "actions": [
+        [
+          "Обман Сл 13",
+          "Если герои выдают себя за людей Остапия, проговаривается про вторую книгу."
+        ],
+        [
+          "Запугивание Сл 14",
+          "Становится слабым свидетелем."
+        ],
+        [
+          "Малаша Сл 13",
+          "Находит мешок с иной пломбой."
+        ]
+      ],
+      "scenes": [
+        "склад",
+        "суд"
+      ]
+    },
+    {
+      "id": "egor-klet",
+      "type": "npc",
+      "name": "Егор Клеть",
+      "subtitle": "Тюремщик, знакомый Савелия",
+      "sigil": "Е",
+      "stats": {
+        "Роль": "проводник",
+        "Сцена": "тюрьма",
+        "Ключ": "вода",
+        "Сл": "12"
+      },
+      "role": "Видел, что Тихон говорит с водой и не ведет себя как обычный убийца.",
+      "actions": [
+        [
+          "Реплика Савелию",
+          "«Ты людей ломанных видел. Этот сам сломался или его кто переломил?»"
+        ],
+        [
+          "Помощь",
+          "Дает минуту у камеры без Остапия."
+        ],
+        [
+          "Резерв",
+          "Подсказывает про люк и старый ход."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "подземелье"
+      ]
+    },
+    {
+      "id": "matrona-ustinya",
+      "type": "npc",
+      "name": "Матрона Устинья",
+      "subtitle": "Голос голодных деревень",
+      "sigil": "У",
+      "stats": {
+        "Роль": "свидетель",
+        "Сцена": "площадь",
+        "Ключ": "зерно",
+        "Риск": "толпа"
+      },
+      "role": "Говорит о зерне и пустых мешках. Помогает вывести игроков из тупика к Сому.",
+      "actions": [
+        [
+          "Крючок",
+          "«Вы у мешков спросите, куда зерно делось»."
+        ],
+        [
+          "Резервная улика",
+          "Видела мешки с пломбами у Сома."
+        ],
+        [
+          "Толпа",
+          "Может поддержать героев, если те говорят о голоде."
+        ]
+      ],
+      "scenes": [
+        "площадь",
+        "суд"
+      ]
+    },
+    {
+      "id": "nastasya-zharok",
+      "type": "npc",
+      "name": "Настасья Жарок",
+      "subtitle": "Жена Тихона, чей голос был украден",
+      "sigil": "Н",
+      "stats": {
+        "Роль": "ключ к мороку",
+        "Сцена": "резерв",
+        "Улика": "голос",
+        "Риск": "ложный образ"
+      },
+      "role": "Ее голос использован мороком, чтобы заставить Тихона ударить Семена.",
+      "actions": [
+        [
+          "Через Тихона",
+          "Тихон слышал ее голос в момент убийства."
+        ],
+        [
+          "Через воду",
+          "Миска в тюрьме может повторить украденный голос."
+        ],
+        [
+          "На суде",
+          "Подтверждает, что не звала Тихона."
+        ]
+      ],
+      "scenes": [
+        "тюрьма",
+        "суд",
+        "Зазеркалье"
+      ]
+    },
+    {
+      "id": "semen-rybtsev",
+      "type": "npc",
+      "name": "Семен Рыбцев",
+      "subtitle": "Убитый младший писарь",
+      "sigil": "С",
+      "stats": {
+        "Роль": "жертва",
+        "Сцена": "дом",
+        "Улика": "книга",
+        "Ключ": "пломбы"
+      },
+      "role": "Нашел двойную зерновую книгу и хотел сделать Тихона свидетелем.",
+      "actions": [
+        [
+          "След",
+          "Пустое место от пропавшей бумаги на столе."
+        ],
+        [
+          "Реплика памяти",
+          "«Тихон, очей не пяль!»"
+        ],
+        [
+          "Связь",
+          "Семен боялся приказных, а не Тихона."
+        ]
+      ],
+      "scenes": [
+        "дом Семена",
+        "Зазеркалье"
+      ]
+    },
+    {
+      "id": "praskovya",
+      "type": "npc",
+      "name": "Прасковья",
+      "subtitle": "Соседка и свидетельница у дома Семена",
+      "sigil": "П",
+      "stats": {
+        "Роль": "свидетель",
+        "Сцена": "дом",
+        "Истина": "страх",
+        "Ложь": "Тихон один"
+      },
+      "role": "Дает одновременно полезную и неполную информацию: Семен боялся приказных, но Тихон пришел один.",
+      "actions": [
+        [
+          "Реплика",
+          "«Если утром к воеводе не дойду, значит, бумага уже сильнее человека стала»."
+        ],
+        [
+          "Истинный след",
+          "Семен боялся приказных."
+        ],
+        [
+          "Ложный след",
+          "Она видела Тихона у дома и уверена, что он пришел один."
+        ]
+      ],
+      "scenes": [
+        "дом Семена"
+      ]
+    },
+    {
+      "id": "whispering-shard",
+      "type": "mob",
+      "name": "Шепчущий осколок",
+      "subtitle": "Слабый враг Зазеркалья, ломает порядок памяти",
+      "sigil": "О",
+      "hp": 10,
+      "ac": 13,
+      "stats": {
+        "ХП": "10",
+        "КЗ": "13",
+        "Скорость": "полет 6 м",
+        "Сл": "12/13"
+      },
+      "role": "Не убивает, а тянет время, сбивает события и мешает групповым проверкам.",
+      "actions": [
+        [
+          "Резаный шепот",
+          "Дальняя атака 9 м, +4, урон 1к6 психического."
+        ],
+        [
+          "Ложная фраза",
+          "Мудрость Сл 12, провал - цель не помогает в групповой проверке до конца следующего хода."
+        ],
+        [
+          "Сдвинуть событие",
+          "Меняет местами два круга памяти; реакция героя Сл 13 отменяет."
+        ]
+      ],
+      "scenes": [
+        "бой З1",
+        "Зазеркалье"
+      ]
+    },
+    {
+      "id": "false-witness",
+      "type": "mob",
+      "name": "Лжесвидетель",
+      "subtitle": "Миньон Ложного Пристава",
+      "sigil": "Л",
+      "hp": 14,
+      "ac": 12,
+      "stats": {
+        "ХП": "14",
+        "КЗ": "12",
+        "Скорость": "9 м",
+        "Эффект": "+2 Сл выхода"
+      },
+      "role": "Пока жив хотя бы один, проверки выхода из Зазеркалья сложнее.",
+      "actions": [
+        [
+          "Обвиняющий крик",
+          "Дальняя атака 12 м, +4, урон 1к6 психического."
+        ],
+        [
+          "Чужой голос",
+          "Мудрость Сл 12, провал - помеха на следующую проверку против морока."
+        ],
+        [
+          "Ложная подпись",
+          "Пристав получает +2 КЗ против первой атаки до следующего хода."
+        ]
+      ],
+      "scenes": [
+        "бой З2",
+        "Зазеркалье"
+      ]
+    },
+    {
+      "id": "false-bailiff",
+      "type": "mob",
+      "name": "Ложный Пристав",
+      "subtitle": "Мини-босс Зазеркалья, судебный морок",
+      "sigil": "П",
+      "hp": 45,
+      "ac": 14,
+      "stats": {
+        "ХП": "45",
+        "КЗ": "14",
+        "Скорость": "9 м",
+        "Сл": "13"
+      },
+      "role": "Блокирует выход, заверяет ложную улику и добавляет искажение времени.",
+      "actions": [
+        [
+          "Посох приговора",
+          "+5, 1к8+2 дробящего + 1к4 психического."
+        ],
+        [
+          "Именем суда",
+          "Мудрость Сл 13, провал - цель не может приблизиться к выходу."
+        ],
+        [
+          "Печать лжи",
+          "Перезарядка 5-6: проверки выхода +2 Сл до конца раунда."
+        ],
+        [
+          "Возражение",
+          "Реакция против предъявления улики: Харизма или Мудрость Сл 13."
+        ]
+      ],
+      "scenes": [
+        "бой З2",
+        "Зазеркалье"
+      ]
+    },
+    {
+      "id": "condemned-shadow",
+      "type": "mob",
+      "name": "Тень приговоренного",
+      "subtitle": "Сильный враг подземелья на лестнице",
+      "sigil": "Т",
+      "hp": 20,
+      "ac": 13,
+      "stats": {
+        "ХП": "20",
+        "КЗ": "13",
+        "Скорость": "9 м",
+        "Сл": "13"
+      },
+      "role": "Тянет героев вниз, гасит свет и режет отход.",
+      "actions": [
+        [
+          "Цепь вины",
+          "+5, 1к8+2 некротического."
+        ],
+        [
+          "Утащить вниз",
+          "Сила/Атлетика Сл 13, провал - сдвиг на 3 м вниз и падение ничком."
+        ],
+        [
+          "Погасить свет",
+          "Гасит ближайшую свечу или фонарь."
+        ]
+      ],
+      "scenes": [
+        "бой П1",
+        "подземелье"
+      ]
+    },
+    {
+      "id": "ostapiy-guard",
+      "type": "mob",
+      "name": "Стражник Остапия",
+      "subtitle": "Физический боец, держит проход и прикрывает бумаги",
+      "sigil": "С",
+      "hp": 24,
+      "ac": 14,
+      "stats": {
+        "ХП": "24",
+        "КЗ": "14",
+        "Скорость": "9 м",
+        "Сл": "13"
+      },
+      "role": "Закрывает проход, удерживает героев от улик, прикрывает побег Остапия.",
+      "actions": [
+        [
+          "Копье или дубина",
+          "+5, 1к8+2."
+        ],
+        [
+          "Прижать щитом",
+          "Сила Сл 13, провал - цель не может пройти мимо без действия."
+        ],
+        [
+          "Закрыть улику",
+          "Взаимодействие с уликой требует сначала оттолкнуть стражника Сл 13."
+        ]
+      ],
+      "scenes": [
+        "архив",
+        "суд"
+      ]
+    },
+    {
+      "id": "archive-arsonist",
+      "type": "mob",
+      "name": "Поджигатель архива",
+      "subtitle": "Сценическая угроза, уничтожает улики",
+      "sigil": "П",
+      "hp": 18,
+      "ac": 13,
+      "stats": {
+        "ХП": "18",
+        "КЗ": "13",
+        "Скорость": "9 м",
+        "Риск": "улика"
+      },
+      "role": "Его цель - сжечь и уйти, а не победить в бою.",
+      "actions": [
+        [
+          "Нож",
+          "+4, 1к6+2."
+        ],
+        [
+          "Искра в деле",
+          "Если огонь не потушить до конца следующего раунда, улика уничтожена."
+        ],
+        [
+          "Беги к приказному",
+          "К концу 3 раунда пытается уйти к выходу."
+        ]
+      ],
+      "scenes": [
+        "бой П2",
+        "архив"
+      ]
+    },
+    {
+      "id": "archive-fire",
+      "type": "mob",
+      "name": "Огонь архива",
+      "subtitle": "Опасная зона и таймер уничтожения улик",
+      "sigil": "О",
+      "stats": {
+        "Урон": "1к6",
+        "Тушение": "Сл 12",
+        "Таймер": "2 раунда",
+        "Тип": "зона"
+      },
+      "role": "Каждый раунд расширяется и повреждает улики. Это враг сцены, а не существо.",
+      "actions": [
+        [
+          "Расширение",
+          "В конце раунда распространяется на 1 соседнюю клетку, если не тушат."
+        ],
+        [
+          "Потушить",
+          "Действие: Ловкость/Природа/Инструменты Сл 12."
+        ],
+        [
+          "Улика",
+          "1 раунд рядом - повреждена; 2 раунда - уничтожена или становится слабой."
+        ]
+      ],
+      "scenes": [
+        "бой П2",
+        "архив"
+      ]
+    },
+    {
+      "id": "mirror-grasp",
+      "type": "mob",
+      "name": "Зеркальная хватка",
+      "subtitle": "Нечистый эффект Судного Зеркала в финале",
+      "sigil": "З",
+      "hp": 22,
+      "ac": 12,
+      "stats": {
+        "ХП": "22",
+        "КЗ": "12",
+        "Скорость": "6 м",
+        "Сл": "12/13"
+      },
+      "role": "Тянет Тихона и улики в отражение. Бьет по цели сцены, а не по слабому герою.",
+      "actions": [
+        [
+          "Холодное касание",
+          "+5, 1к6+2 психического."
+        ],
+        [
+          "Тянуть в отражение",
+          "Сила Сл 12, провал - сдвиг на 3 м."
+        ],
+        [
+          "Украсть улику",
+          "Реакция героя Ловкость/Расследование Сл 13, иначе улика уходит в отражение."
+        ]
+      ],
+      "scenes": [
+        "бой 5",
+        "суд"
+      ]
+    }
+  ],
+  "heroes": {
+    "yashka-brosok": {
+      "file": "01-yashka-brosok.html",
+      "html": "<!doctype html><html><body><article class=\"sheet\"> <div class=\"sheet-title\">Пять дней до петли · Карточка игрока</div> <div class=\"header\"> <div class=\"avatar\">ЯБ</div> <div class=\"header-info\"> <div class=\"char-name\">Яшка-Бросок</div> <div class=\"char-sub\">Ловкач · Дальний боец · Мастер толпы и крыш</div> <div class=\"badges\"> <span class=\"badge\">Ловкость +4</span> <span class=\"badge\">Харизма +2</span> <span class=\"badge\">Бонус +2</span> </div> </div> </div> <div class=\"vitals\"> <div class=\"vital\"> <div class=\"vital-label\">Здоровье</div> <div style=\"display:flex;align-items:baseline;justify-content:center;gap:4px\"> <span class=\"vital-val hp-val\">30</span> <span class=\"vital-max\">/ <span class=\"hp-max\">30</span></span> </div> <div class=\"hp-bar\"><div class=\"hp-fill\" style=\"width:100%\"></div></div> <div class=\"hp-controls\"> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,-1)\" aria-label=\"Уменьшить HP\">−</button> <span style=\"font-size:11px;color:var(--color-text-secondary)\">HP</span> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,1)\" aria-label=\"Увеличить HP\">+</button> </div> </div> <div class=\"vital\"> <div class=\"vital-label\">Класс доспеха</div> <div class=\"vital-val\">14</div> <div class=\"vital-max\">Лёгкая кожа</div> </div> <div class=\"vital\"> <div class=\"vital-label\">Скорость</div> <div class=\"vital-val\">9 м</div> <div class=\"vital-max\">Бонус +2</div> </div> </div> <div class=\"section-title\">Характеристики</div> <div class=\"attrs\"> <div class=\"attr\"> <div class=\"attr-name\">Сила</div> <div class=\"attr-val\">10</div> <div class=\"attr-mod\">+0</div> </div> <div class=\"attr\"> <div class=\"attr-name\">Ловкость</div> <div class=\"attr-val\">18</div> <div class=\"attr-mod\">+4</div> </div> <div class=\"attr\"> <div class=\"attr-name\">Телос.</div> <div class=\"attr-val\">12</div> <div class=\"attr-mod\">+1</div> </div> <div class=\"attr\"> <div class=\"attr-name\">Интел.</div> <div class=\"attr-val\">12</div> <div class=\"attr-mod\">+1</div> </div> <div class=\"attr\"> <div class=\"attr-name\">Мудрость</div> <div class=\"attr-val\">10</div> <div class=\"attr-mod\">+0</div> </div> <div class=\"attr\"> <div class=\"attr-name\">Харизма</div> <div class=\"attr-val\">14</div> <div class=\"attr-mod\">+2</div> </div> </div> <div class=\"two-col\"> <div> <div class=\"section-title\">Спасброски</div> <div class=\"skills\"> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Ловкость</span> <span class=\"skill-bonus\">+6</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Харизма</span> <span class=\"skill-bonus\">+4</span> </button> </div> <div class=\"section-title\">Оружие</div> <div class=\"inv\"> <div class=\"inv-item\"> <span class=\"inv-icon\">🗡</span> <div> <div class=\"inv-name\">Метательный кинжал / топорик</div> <div class=\"inv-note\">Атака +6 · Урон 1к4+4 · Дист. 6/18 м</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">🔪</span> <div> <div class=\"inv-name\">Нож в рукаве</div> <div class=\"inv-note\">Атака +6 · Урон 1к4+4 · Можно скрытно</div> </div> </div> </div> </div> <div> <div class=\"section-title\">Инвентарь</div> <div class=\"inv\"> <div class=\"inv-item\"><span class=\"inv-icon\">🗡</span><div><div class=\"inv-name\">10 метательных кинжалов/топориков</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🧥</span><div><div class=\"inv-name\">Лёгкая кожаная броня</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🔑</span><div><div class=\"inv-name\">Набор отмычек</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⚗</span><div><div class=\"inv-name\">Кислота в пузырьке</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🎭</span><div><div class=\"inv-name\">Пёстрый скомороший платок</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🪞</span><div><div class=\"inv-name\">Маленькое зеркальце с трещиной</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">💰</span><div><div class=\"inv-name\">Мешочек медных монет</div><div class=\"inv-note\">Для отвлечения толпы</div></div></div> </div> </div> </div> <div class=\"section-title\">Умения</div> <div class=\"inv\" style=\"margin-bottom:1.25rem\"> <div class=\"inv-item ability\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">⚔️ Атакующее</div> <div class=\"ability-name\">Веер стали</div> <div class=\"ability-desc\">Действие. Атакует до 3 целей в пределах 12 м — отдельный бросок по каждой. Урон: стандартный урон оружия.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (1 за короткий отдых)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" title=\"Использование 1\"></div> </div> </div> </div> <div class=\"inv-item ability\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🛡️ Защитное · Реакция</div> <div class=\"ability-name\">Кувырок циркача</div> <div class=\"ability-desc\">Когда по Яшке попали атакой. Получает +5 к КЗ против этой атаки. Если промахнулся — может отступить на 3 м без провоцирования атак.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item ability\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">💬 Социальное</div> <div class=\"ability-name\">Смех против страха</div> <div class=\"ability-desc\">Действие вне боя или бонусная заявка. Ломает напряжение трюком, шуткой или дерзкой репликой. Один союзник получает преимущество на следующую проверку Харизмы, Мудрости или спасбросок против страха.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> </div> <div class=\"ulta-card\"> <div class=\"ulta-label\">💥 Ульта · 1 раз за игру</div> <div class=\"ulta-name\">Смерть под аплодисменты</div> <div class=\"ulta-desc\">Одна атака метательным оружием с тройным преимуществом: бросает 3к20 и выбирает лучший результат. При попадании атака критическая — кости урона удваиваются. Цель делает спасбросок Телосложения <strong>Сл 14</strong>. При провале — оглушена до конца своего следующего хода.</div> <div class=\"uses-tracker\" style=\"margin-top:8px\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" style=\"background:var(--color-accent);border-color:var(--color-accent)\"></div> </div> </div> <div class=\"section-title\">Преимущества в этом приключении</div> <div class=\"adv-list\"> <div class=\"adv-item\"><span class=\"adv-icon\">🎪</span><span>Отвлекает толпу на площади</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">😄</span><span>Разговаривает с простыми людьми через шутку или представление</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🏠</span><span>Лезет по крышам, лавкам, балкам, судейским скамьям</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">📜</span><span>Ворует накладную или ключ у приказчика</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🪞</span><span>В Зазеркалье спорит с отражением через игру, маску или насмешку</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚖️</span><span>На суде удерживает толпу от крика «казнить»</span></div> </div> <div class=\"section-title\">Подсказки игроку</div> <div class=\"tips-list\"> <div class=\"tip-item\">🛒 <strong>Купец Сом:</strong> попробуй отвлечь приказчика и вытащить бумагу.</div> <div class=\"tip-item\">🪞 <strong>Зазеркалье:</strong> не бей первым — сначала назови ложь смешной.</div> <div class=\"tip-item\">⚖️ <strong>Финальный суд:</strong> ты можешь спасти доверие толпы.</div> </div> <div class=\"section-title\">История</div> <div class=\"notes-box\">Был скоморохом и метальщиком в бродячем круге. После резни, рабства и мести его нашла Опричнина. Теперь трюки не для потехи: отвлекает стражу, режет по слабым местам, выводит людей на разговор и делает так, чтобы враг смотрел не туда.</div> <div class=\"footer\"> <span class=\"footer-hint\">HP меняется кнопками · пипки умений кликабельны</span> <span class=\"export-date\">Пять дней до петли · 2026</span> </div> </article></body></html>"
+    },
+    "malasha-inokop": {
+      "file": "02-malasha-inokop.html",
+      "html": "<!doctype html><html><body><article class=\"sheet\"> <div class=\"sheet-title\">Пять дней до петли · Карточка игрока</div> <div class=\"header\"> <div class=\"avatar\">МИ</div> <div class=\"header-info\"> <div class=\"char-name\">Малаша-Инокопь</div> <div class=\"char-sub\">Инженер · Сапёр · Мастер ловушек и механизмов</div> <div class=\"badges\"> <span class=\"badge\">Ловкость +3</span> <span class=\"badge\">Интеллект +3</span> <span class=\"badge\">Бонус +2</span> </div> </div> </div> <div class=\"vitals\"> <div class=\"vital\"> <div class=\"vital-label\">Здоровье</div> <div style=\"display:flex;align-items:baseline;justify-content:center;gap:4px\"> <span class=\"vital-val hp-val\">30</span> <span class=\"vital-max\">/ <span class=\"hp-max\">30</span></span> </div> <div class=\"hp-bar\"><div class=\"hp-fill\" style=\"width:100%\"></div></div> <div class=\"hp-controls\"> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,-1)\" aria-label=\"Уменьшить HP\">−</button> <span style=\"font-size:11px;color:var(--color-text-secondary)\">HP</span> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,1)\" aria-label=\"Увеличить HP\">+</button> </div> </div> <div class=\"vital\"> <div class=\"vital-label\">Класс доспеха</div> <div class=\"vital-val\">14</div> <div class=\"vital-max\">Лёгкий доспех</div> </div> <div class=\"vital\"> <div class=\"vital-label\">Скорость</div> <div class=\"vital-val\">9 м</div> <div class=\"vital-max\">Бонус +2</div> </div> </div> <div class=\"section-title\">Характеристики</div> <div class=\"attrs\"> <div class=\"attr\"><div class=\"attr-name\">Сила</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Ловкость</div><div class=\"attr-val\">16</div><div class=\"attr-mod\">+3</div></div> <div class=\"attr\"><div class=\"attr-name\">Телос.</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> <div class=\"attr\"><div class=\"attr-name\">Интел.</div><div class=\"attr-val\">16</div><div class=\"attr-mod\">+3</div></div> <div class=\"attr\"><div class=\"attr-name\">Мудрость</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> <div class=\"attr\"><div class=\"attr-name\">Харизма</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> </div> <div class=\"two-col\"> <div> <div class=\"section-title\">Спасброски</div> <div class=\"skills\"> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Ловкость</span> <span class=\"skill-bonus\">+5</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Интеллект</span> <span class=\"skill-bonus\">+5</span> </button> </div> <div class=\"section-title\">Оружие</div> <div class=\"inv\"> <div class=\"inv-item\"> <span class=\"inv-icon\">🏹</span> <div> <div class=\"inv-name\">Арбалет-наруч «Голос»</div> <div class=\"inv-note\">Атака +5 · Урон 1к6+3 · Дист. 9/36 м · 6 болтов · Перезарядка всех 6 — действие</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">🔪</span> <div> <div class=\"inv-name\">Нож ремесленника</div> <div class=\"inv-note\">Атака +5 · Урон 1к4+3 колющий</div> </div> </div> </div> </div> <div> <div class=\"section-title\">Инвентарь</div> <div class=\"inv\"> <div class=\"inv-item\"><span class=\"inv-icon\">🏹</span><div><div class=\"inv-name\">18 обычных болтов + 3 серебряных</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🧰</span><div><div class=\"inv-name\">Набор инструментов</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⛓</span><div><div class=\"inv-name\">Материалы для 3 ловушек</div><div class=\"inv-note\">Силки, настороженный болт, шумовая растяжка</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⚙</span><div><div class=\"inv-name\">Клинья, проволока, шестерни</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">✏</span><div><div class=\"inv-name\">Сажа и мел для отметок</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🔧</span><div><div class=\"inv-name\">Напильник для пломб и замков</div></div></div> </div> </div> </div> <div class=\"section-title\">Умения</div> <div class=\"inv\" style=\"margin-bottom:1.25rem\"> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">⚔️ Атакующее</div> <div class=\"ability-name\">Град шпилек</div> <div class=\"ability-desc\">Действие. Залп из 3 болтов по одной цели. Атака +5. Урон: 3к4 колющего. Если все три кости одинаковые — цель получает кровотечение: 1к4 урона в конце каждого хода, пока не получит помощь или не потратит действие.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (1 за короткий отдых)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🛡️ Защитное / Контроль · Реакция</div> <div class=\"ability-name\">Силок на тварь</div> <div class=\"ability-desc\">Когда враг движется к Малаше или союзнику в пределах 3 м. Цель — спасбросок Ловкости <strong>Сл 13</strong>. Провал: скорость 0, опутана до конца следующего хода (или действие на Силу Сл 13).</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🔍 Сюжетное</div> <div class=\"ability-name\">Рука мастера</div> <div class=\"ability-desc\">Малаша изучает механизм, замок, пломбу, ловушку или конструкцию. Преимущество на одну проверку Интеллекта / Инструментов / Расследования, связанную с механизмом, подделкой, пломбой, скрытым ходом или ловушкой.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> </div> <div class=\"ulta-card\"> <div class=\"ulta-label\">💥 Ульта · 1 раз за игру</div> <div class=\"ulta-name\">Паучье гнездо</div> <div class=\"ulta-desc\">Малаша выпускает сеть тонких тросов с крючьями вокруг себя. Все враги в радиусе 6 м — спасбросок Ловкости <strong>Сл 14</strong>. <br>Провал: 2к6 режущего урона, скорость вдвое на 1 минуту, зона труднопроходима.<br>Успех: половина урона, скорость не снижается.</div> <div class=\"uses-tracker\" style=\"margin-top:8px\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" style=\"background:var(--color-accent);border-color:var(--color-accent)\"></div> </div> </div> <div class=\"section-title\">Преимущества в этом приключении</div> <div class=\"adv-list\"> <div class=\"adv-item\"><span class=\"adv-icon\">🔏</span><span>Осматривает пломбы Тихона</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🪟</span><span>Проверяет, разбито ли окно изнутри</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚠</span><span>Ищет ловушку на входе в подземелье</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⛓</span><span>Работает с цепями, дверями, замками, сундуками</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">📚</span><span>Спасает архивные книги из огня</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚖️</span><span>Соединяет воеводскую печать с восстановленной пломбой на суде</span></div> </div> <div class=\"section-title\">Подсказки игроку</div> <div class=\"tips-list\"> <div class=\"tip-item\">🏠 <strong>Дом Семёна:</strong> проверь окно, черепок и стол.</div> <div class=\"tip-item\">🕯 <strong>Подземелье:</strong> сначала ищи механизм, потом бей.</div> <div class=\"tip-item\">⚖️ <strong>Финал:</strong> ты можешь доказать подделку пломб лучше любого свидетеля.</div> </div> <div class=\"section-title\">История</div> <div class=\"notes-box\">Выросла среди замков, силков, чужих ворот и лесных ловушек. Создала многозарядный арбалет-наруч «Голос» и научилась видеть устройство тьмы как механизм: где нажим, где пружина, где слабое место.</div> <div class=\"footer\"> <span class=\"footer-hint\">HP меняется кнопками · пипки умений кликабельны</span> <span class=\"export-date\">Пять дней до петли · 2026</span> </div> </article></body></html>"
+    },
+    "agafya-travnitsa": {
+      "file": "03-agafya-travnitsa.html",
+      "html": "<!doctype html><html><body><article class=\"sheet\"> <div class=\"sheet-title\">Пять дней до петли · Карточка игрока</div> <div class=\"header\"> <div class=\"avatar\">АТ</div> <div class=\"header-info\"> <div class=\"char-name\">Агафья-Травница</div> <div class=\"char-sub\">Алхимик · Целитель · Знаток тела, ядов и следов воздействия</div> <div class=\"badges\"> <span class=\"badge\">Интеллект +4</span> <span class=\"badge\">Мудрость +3</span> <span class=\"badge\">Бонус +2</span> </div> </div> </div> <div class=\"vitals\"> <div class=\"vital\"> <div class=\"vital-label\">Здоровье</div> <div style=\"display:flex;align-items:baseline;justify-content:center;gap:4px\"> <span class=\"vital-val hp-val\">30</span> <span class=\"vital-max\">/ <span class=\"hp-max\">30</span></span> </div> <div class=\"hp-bar\"><div class=\"hp-fill\" style=\"width:100%\"></div></div> <div class=\"hp-controls\"> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,-1)\" aria-label=\"Уменьшить HP\">−</button> <span style=\"font-size:11px;color:var(--color-text-secondary)\">HP</span> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,1)\" aria-label=\"Увеличить HP\">+</button> </div> </div> <div class=\"vital\"> <div class=\"vital-label\">Класс доспеха</div> <div class=\"vital-val\">13</div> <div class=\"vital-max\">Без тяжёлой брони</div> </div> <div class=\"vital\"> <div class=\"vital-label\">Скорость</div> <div class=\"vital-val\">9 м</div> <div class=\"vital-max\">Бонус +2</div> </div> </div> <div class=\"section-title\">Характеристики</div> <div class=\"attrs\"> <div class=\"attr\"><div class=\"attr-name\">Сила</div><div class=\"attr-val\">8</div><div class=\"attr-mod\">−1</div></div> <div class=\"attr\"><div class=\"attr-name\">Ловкость</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> <div class=\"attr\"><div class=\"attr-name\">Телос.</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Интел.</div><div class=\"attr-val\">18</div><div class=\"attr-mod\">+4</div></div> <div class=\"attr\"><div class=\"attr-name\">Мудрость</div><div class=\"attr-val\">16</div><div class=\"attr-mod\">+3</div></div> <div class=\"attr\"><div class=\"attr-name\">Харизма</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> </div> <div class=\"two-col\"> <div> <div class=\"section-title\">Спасброски</div> <div class=\"skills\"> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Интеллект</span> <span class=\"skill-bonus\">+6</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Мудрость</span> <span class=\"skill-bonus\">+5</span> </button> </div> <div class=\"section-title\">Оружие</div> <div class=\"inv\"> <div class=\"inv-item\"> <span class=\"inv-icon\">🗡</span> <div> <div class=\"inv-name\">Серебряный кинжал</div> <div class=\"inv-note\">Атака +3 · Урон 1к4+1 · Считается серебряным</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">⚗</span> <div> <div class=\"inv-name\">Кислотная склянка (×2)</div> <div class=\"inv-note\">Атака +6 · Урон 1к6 кислотой · Дист. 6/18 м</div> </div> </div> </div> </div> <div> <div class=\"section-title\">Инвентарь</div> <div class=\"inv\"> <div class=\"inv-item\"><span class=\"inv-icon\">🩹</span><div><div class=\"inv-name\">Аптечка с бинтами и настойками</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⚗</span><div><div class=\"inv-name\">Набор алхимических реагентов</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">💥</span><div><div class=\"inv-name\">1 гремучий порошок</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🧪</span><div><div class=\"inv-name\">Мелкие стеклянные пробирки</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🌿</span><div><div class=\"inv-name\">Сухой полынный дым</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">💉</span><div><div class=\"inv-name\">Игла для взятия крови</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🔍</span><div><div class=\"inv-name\">Лупа из мутного стекла</div></div></div> </div> </div> </div> <div class=\"section-title\">Умения</div> <div class=\"inv\" style=\"margin-bottom:1.25rem\"> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🔥 Атакующее</div> <div class=\"ability-name\">Гремучая смесь</div> <div class=\"ability-desc\">Действие. Бросает колбу в точку в пределах 12 м. Все цели в радиусе 3 м — спасбросок Ловкости <strong>Сл 14</strong>. Провал: 3к6 урона огнём. Успех: половина урона.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (1 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">💚 Исцеляющее</div> <div class=\"ability-name\">Настой живучести</div> <div class=\"ability-desc\">Действие. На умирающего: стабилизирует и возвращает 1 ХП. На живого союзника: лечит <strong>2к8+4 ХП</strong>.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🔬 Сюжетное</div> <div class=\"ability-name\">Чистое заключение</div> <div class=\"ability-desc\">Осматривает тело, кровь, пыль, зерно, яд, морок или след воздействия. Преимущество на одну проверку Медицины, Природы, Расследования или Интеллекта, связанную с физическими следами.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> </div> <div class=\"ulta-card\"> <div class=\"ulta-label\">💥 Ульта · 1 раз за игру</div> <div class=\"ulta-name\">Пробуждение прародителя</div> <div class=\"ulta-desc\">Распыляет реагент, нарушающий связь нежити и духов с миром. Все нежить, духи и зеркальные сущности в конусе 9 м — спасбросок Мудрости <strong>Сл 15</strong>.<br>Провал: бегство на 1 раунд + уязвимость ко всем видам урона на 1 минуту.<br>Успех: не бегут, но теряют реакцию до конца следующего хода.</div> <div class=\"uses-tracker\" style=\"margin-top:8px\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" style=\"background:var(--color-accent);border-color:var(--color-accent)\"></div> </div> </div> <div class=\"section-title\">Преимущества в этом приключении</div> <div class=\"adv-list\"> <div class=\"adv-item\"><span class=\"adv-icon\">🏥</span><span>Осматривает Тихона в тюрьме</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🌾</span><span>Проверяет зерновую пыль, кровь, черепки и сырость</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🧠</span><span>Доказывает, что Тихон не был пьян или отравлен обычным способом</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🪞</span><span>Изучает влияние Судного Зеркала на тело</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">💨</span><span>Тушит / нейтрализует дым и реагенты в архиве</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚖️</span><span>На суде объясняет физические признаки подавленной воли</span></div> </div> <div class=\"section-title\">Подсказки игроку</div> <div class=\"tips-list\"> <div class=\"tip-item\">👁 <strong>Осмотри Тихона</strong> до того, как поверишь его словам.</div> <div class=\"tip-item\">🌾 <strong>Черепок, пыль и кровь</strong> важнее слухов.</div> <div class=\"tip-item\">⚖️ <strong>На суде</strong> твоя задача — перевести «морок» на язык признаков, которые поймут люди.</div> </div> <div class=\"section-title\">История</div> <div class=\"notes-box\">Продолжила дело отца, который искал средство от порчи и погиб от неизвестной силы. Саму едва не казнили как ведьму, но Опричнина увидела в ней не колдунью, а учёного. Она не верит чистым словам: тело, кровь, пыль и запах говорят честнее людей.</div> <div class=\"footer\"> <span class=\"footer-hint\">HP меняется кнопками · пипки умений кликабельны</span> <span class=\"export-date\">Пять дней до петли · 2026</span> </div> </article></body></html>"
+    },
+    "varfolomei-molchalnik": {
+      "file": "04-varlolomei-molchalnik.html",
+      "html": "<!doctype html><html><body><article class=\"sheet\"> <div class=\"sheet-title\">Пять дней до петли · Карточка игрока</div> <div class=\"header\"> <div class=\"avatar\">ВМ</div> <div class=\"header-info\"> <div class=\"char-name\">Брат Варфоломей-Молчальник</div> <div class=\"char-sub\">Духовник · Щит от морока · Чистильщик статусов</div> <div class=\"badges\"> <span class=\"badge\">Мудрость +4</span> <span class=\"badge\">Телос. +2</span> <span class=\"badge\">Харизма +1</span> </div> </div> </div> <div class=\"special-banner\"> ✨ <strong>Особенность:</strong> Преимущество на все спасброски против очарования, страха и иллюзий. </div> <div class=\"vitals\"> <div class=\"vital\"> <div class=\"vital-label\">Здоровье</div> <div style=\"display:flex;align-items:baseline;justify-content:center;gap:4px\"> <span class=\"vital-val hp-val\">30</span> <span class=\"vital-max\">/ <span class=\"hp-max\">30</span></span> </div> <div class=\"hp-bar\"><div class=\"hp-fill\" style=\"width:100%\"></div></div> <div class=\"hp-controls\"> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,-1)\" aria-label=\"Уменьшить HP\">−</button> <span style=\"font-size:11px;color:var(--color-text-secondary)\">HP</span> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,1)\" aria-label=\"Увеличить HP\">+</button> </div> </div> <div class=\"vital\"> <div class=\"vital-label\">Класс доспеха</div> <div class=\"vital-val\">14</div> <div class=\"vital-max\">Ряса с узлами</div> </div> <div class=\"vital\"> <div class=\"vital-label\">Скорость</div> <div class=\"vital-val\">9 м</div> <div class=\"vital-max\">Бонус +2</div> </div> </div> <div class=\"section-title\">Характеристики</div> <div class=\"attrs\"> <div class=\"attr\"><div class=\"attr-name\">Сила</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Ловкость</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Телос.</div><div class=\"attr-val\">14</div><div class=\"attr-mod\">+2</div></div> <div class=\"attr\"><div class=\"attr-name\">Интел.</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> <div class=\"attr\"><div class=\"attr-name\">Мудрость</div><div class=\"attr-val\">18</div><div class=\"attr-mod\">+4</div></div> <div class=\"attr\"><div class=\"attr-name\">Харизма</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> </div> <div class=\"two-col\"> <div> <div class=\"section-title\">Спасброски</div> <div class=\"skills\"> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Мудрость</span> <span class=\"skill-bonus\">+6</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Телосложение</span> <span class=\"skill-bonus\">+4</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Харизма</span> <span class=\"skill-bonus\">+3</span> </button> </div> <div class=\"section-title\">Оружие</div> <div class=\"inv\"> <div class=\"inv-item\"> <span class=\"inv-icon\">🪄</span> <div> <div class=\"inv-name\">Посох</div> <div class=\"inv-note\">Атака +2 · Урон 1к6 дробящий</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">🌟</span> <div> <div class=\"inv-name\">Слово Отречения</div> <div class=\"inv-note\">Дальн. атака +6 · Урон 2к6 психич. · Дист. 18 м</div> </div> </div> </div> </div> <div> <div class=\"section-title\">Инвентарь</div> <div class=\"inv\"> <div class=\"inv-item\"><span class=\"inv-icon\">🪄</span><div><div class=\"inv-name\">Посох</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">👘</span><div><div class=\"inv-name\">Ряса с обережными узлами</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">📿</span><div><div class=\"inv-name\">Чётки из рябины и чертополоха</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">💧</span><div><div class=\"inv-name\">Сосуд со святой водой</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⚰</span><div><div class=\"inv-name\">Земля с могилы святого</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">✝</span><div><div class=\"inv-name\">Малый крест без украшений</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🧶</span><div><div class=\"inv-name\">Лоскут ткани</div><div class=\"inv-note\">Для закрытия зеркала</div></div></div> </div> </div> </div> <div class=\"section-title\">Умения</div> <div class=\"inv\" style=\"margin-bottom:1.25rem\"> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">⚔️ Атакующее</div> <div class=\"ability-name\">Слово Отречения</div> <div class=\"ability-desc\">Действие. Дальняя атака на цель в пределах 18 м. Атака +6. Попадание: 2к6 психического урона. Если цель поддерживает эффект очарования, страха или иллюзии — один такой эффект немедленно прекращается.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🛡️ Защитное · Действие или Реакция</div> <div class=\"ability-name\">Круг Безмолвия</div> <div class=\"ability-desc\">Создаёт вокруг себя или союзника (в пределах 6 м) круг покоя радиусом 1.5 м. Союзники внутри — преимущество на спасброски Мудрости и Харизмы. Нежить / дух / зеркальная сущность, пытаясь войти, делает спасбросок Мудрости <strong>Сл 15</strong> (при провале — не может войти). Длительность: 1 раунд.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (1 за короткий отдых)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🔇 Сюжетное</div> <div class=\"ability-name\">Точка тишины</div> <div class=\"ability-desc\">Варфоломей сосредотачивается и слушает не слова, а источник страха. Преимущество на проверку Религии, Мудрости или Проницательности против морока, страха, отражения, ложного голоса или Судного Зеркала.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> </div> <div class=\"ulta-card\"> <div class=\"ulta-label\">✨ Ульта · 1 раз за игру</div> <div class=\"ulta-name\">Пробуждение Отсвета</div> <div class=\"ulta-desc\">Все союзники в радиусе 9 м немедленно избавляются от эффектов очарования, страха, сна и иллюзий. На 1 минуту союзники в радиусе получают сопротивление некротическому урону, а их удары считаются освящёнными и наносят дополнительно <strong>1к4 лучевого урона</strong> нежити, духам и зеркальным сущностям.</div> <div class=\"uses-tracker\" style=\"margin-top:8px\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" style=\"background:var(--color-accent);border-color:var(--color-accent)\"></div> </div> </div> <div class=\"section-title\">Преимущества в этом приключении</div> <div class=\"adv-list\"> <div class=\"adv-item\"><span class=\"adv-icon\">💧</span><span>Проверяет миску воды в камере Тихона</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🏛</span><span>Определяет след морока в ратуше</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🪞</span><span>Спорит с отражением в Зазеркалье</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🧶</span><span>Закрывает зеркало тканью или святой водой</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🛡</span><span>Защищает союзника от страха</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚖️</span><span>На суде объясняет морок без паники и фанатизма</span></div> </div> <div class=\"section-title\">Подсказки игроку</div> <div class=\"tips-list\"> <div class=\"tip-item\">🪞 <strong>Зазеркалье:</strong> ты нужен не для урона, а для защиты воли.</div> <div class=\"tip-item\">😨 Если кто-то проваливает страх или морок — используй <strong>Круг Безмолвия</strong>.</div> <div class=\"tip-item\">⚖️ <strong>Финал:</strong> твоя речь может дать суду доверие, а группе — шанс уничтожить зеркало.</div> </div> <div class=\"section-title\">История</div> <div class=\"notes-box\">Вышел из северного скита, где учили стоять против бесовских наваждений не криком, а внутренней тишиной. Его монастырь погубила сила, не оставившая тел — только безумие. Он выжил, потому что нашёл в себе место, где чужой шёпот гаснет.</div> <div class=\"footer\"> <span class=\"footer-hint\">HP меняется кнопками · пипки умений кликабельны</span> <span class=\"export-date\">Пять дней до петли · 2026</span> </div> </article></body></html>"
+    },
+    "saveliy-glukhoy-kolokol": {
+      "file": "05-saveliy-glukhoy-kolokol.html",
+      "html": "<!doctype html><html><body><article class=\"sheet\"> <div class=\"sheet-title\">Пять дней до петли · Карточка игрока</div> <div class=\"header\"> <div class=\"avatar\">СК</div> <div class=\"header-info\"> <div class=\"char-name\">Савелий «Глухой Колокол»</div> <div class=\"char-sub\">Танк · Тюремный десятник · Специалист по допросам и ложным признаниям</div> <div class=\"badges\"> <span class=\"badge\">Сила +3</span> <span class=\"badge\">Телос. +3</span> <span class=\"badge\">Мудрость +2</span> <span class=\"badge\">ХП 36</span> </div> </div> </div> <div class=\"vitals\"> <div class=\"vital\"> <div class=\"vital-label\">Здоровье</div> <div style=\"display:flex;align-items:baseline;justify-content:center;gap:4px\"> <span class=\"vital-val hp-val\">36</span> <span class=\"vital-max\">/ <span class=\"hp-max\">36</span></span> </div> <div class=\"hp-bar\"><div class=\"hp-fill\" style=\"width:100%\"></div></div> <div class=\"hp-controls\"> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,-1)\" aria-label=\"Уменьшить HP\">−</button> <span style=\"font-size:11px;color:var(--color-text-secondary)\">HP</span> <button class=\"hp-btn\" type=\"button\" onclick=\"changeHP(this,1)\" aria-label=\"Увеличить HP\">+</button> </div> </div> <div class=\"vital\"> <div class=\"vital-label\">Класс доспеха</div> <div class=\"vital-val\">16</div> <div class=\"vital-max\">Со щитом (+2 уже вкл.)</div> </div> <div class=\"vital\"> <div class=\"vital-label\">Скорость</div> <div class=\"vital-val\">9 м</div> <div class=\"vital-max\">Бонус +2</div> </div> </div> <div class=\"section-title\">Характеристики</div> <div class=\"attrs\"> <div class=\"attr\"><div class=\"attr-name\">Сила</div><div class=\"attr-val\">16</div><div class=\"attr-mod\">+3</div></div> <div class=\"attr\"><div class=\"attr-name\">Ловкость</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Телос.</div><div class=\"attr-val\">16</div><div class=\"attr-mod\">+3</div></div> <div class=\"attr\"><div class=\"attr-name\">Интел.</div><div class=\"attr-val\">10</div><div class=\"attr-mod\">+0</div></div> <div class=\"attr\"><div class=\"attr-name\">Мудрость</div><div class=\"attr-val\">14</div><div class=\"attr-mod\">+2</div></div> <div class=\"attr\"><div class=\"attr-name\">Харизма</div><div class=\"attr-val\">12</div><div class=\"attr-mod\">+1</div></div> </div> <div class=\"two-col\"> <div> <div class=\"section-title\">Спасброски</div> <div class=\"skills\"> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Сила</span> <span class=\"skill-bonus\">+5</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Телосложение</span> <span class=\"skill-bonus\">+5</span> </button> <button class=\"skill\" type=\"button\" onclick=\"toggleSkill(this)\"> <span class=\"skill-dot proficient\"></span> <span class=\"skill-name\">Мудрость</span> <span class=\"skill-bonus\">+4</span> </button> </div> <div class=\"section-title\">Оружие</div> <div class=\"inv\"> <div class=\"inv-item\"> <span class=\"inv-icon\">🔨</span> <div> <div class=\"inv-name\">Булава «Ключник»</div> <div class=\"inv-note\">Атака +5 · Урон 1к8+3 дробящий</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">🗡</span> <div> <div class=\"inv-name\">Короткий тесак</div> <div class=\"inv-note\">Атака +5 · Урон 1к6+3 рубящий</div> </div> </div> <div class=\"inv-item\"> <span class=\"inv-icon\">🛡</span> <div> <div class=\"inv-name\">Щит тюремного десятника</div> <div class=\"inv-note\">+2 КЗ уже включены в КЗ 16</div> </div> </div> </div> </div> <div> <div class=\"section-title\">Инвентарь</div> <div class=\"inv\"> <div class=\"inv-item\"><span class=\"inv-icon\">🛡</span><div><div class=\"inv-name\">Щит с тюремным знаком</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🗝</span><div><div class=\"inv-name\">Связка старых ключей</div><div class=\"inv-note\">Не все ещё подходят</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">⛓</span><div><div class=\"inv-name\">Наручные цепи</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🪢</span><div><div class=\"inv-name\">Толстая верёвка</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">✏</span><div><div class=\"inv-name\">Мел для меток на стенах</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">🍞</span><div><div class=\"inv-name\">Кусок чёрного хлеба и соль</div></div></div> <div class=\"inv-item\"><span class=\"inv-icon\">📝</span><div><div class=\"inv-name\">Старая записка</div><div class=\"inv-note\">От заключённого, которого он не спас</div></div></div> </div> </div> </div> <div class=\"section-title\">Умения</div> <div class=\"inv\" style=\"margin-bottom:1.25rem\"> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">⚔️ Атакующее</div> <div class=\"ability-name\">Тюремный удар</div> <div class=\"ability-desc\">Действие. Бьёт чтобы сломать стойку, а не убить. Атака +5. Урон: 1к8+3 дробящий. При попадании — спасбросок Силы <strong>Сл 13</strong>. Провал: цель оттолкнута на 3 м <em>или</em> сбита с ног (выбор Савелия).</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🛡️ Защитное · Реакция или Действие</div> <div class=\"ability-name\">Закрыть проход</div> <div class=\"ability-desc\">Занимает позицию и закрывает собой союзника, дверь, лестницу или узкий проход. До начала следующего хода Савелия: враги в пределах 1.5 м получают помеху на атаки по другим целям. Один союзник за ним получает <strong>+2 к КЗ</strong>.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за короткий отдых)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">📣 Контроль</div> <div class=\"ability-name\">Железный окрик</div> <div class=\"ability-desc\">Действие. Одна гуманоидная цель в 9 м — спасбросок Мудрости <strong>Сл 13</strong> (против стражников, заключённых и приказных — <strong>Сл 15</strong>). Провал: не может двигаться к выбранному союзнику + помеха на первую атаку до конца следующего хода.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (2 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> <div class=\"inv-item\" style=\"display:block;padding:10px 14px;\"> <div class=\"ability-type\">🔍 Сюжетное</div> <div class=\"ability-name\">Знаю, как ломают людей</div> <div class=\"ability-desc\">Распознаёт признаки ложного признания, давления, страха перед начальством или тюремной постановки. Преимущество на Проницательность, Запугивание, Расследование или Мудрость в сценах тюрьмы, суда, допроса и ложных признаний.</div> <div> <div style=\"font-size:10px;color:var(--color-text-secondary);margin-top:6px;margin-bottom:3px;font-family:var(--font-serif);text-transform:uppercase;letter-spacing:0.05em\">Использований (3 за игру)</div> <div class=\"uses-tracker\"> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> <div class=\"use-pip\" onclick=\"togglePip(this)\"></div> </div> </div> </div> </div> <div class=\"ulta-card\"> <div class=\"ulta-label\">🔔 Ульта · 1 раз за игру</div> <div class=\"ulta-name\">Глухой колокол</div> <div class=\"ulta-desc\">Савелий ударяет булавой в щит — звук гасит панику, как удар колокола перед казнью.<br><br> <strong>Союзники в 9 м:</strong> снимает состояние испуга · даёт временные 1к8+3 ХП · преимущество на спасброски Силы, Телосложения и Мудрости до конца следующего раунда.<br><br> <strong>Враги в 6 м</strong> — спасбросок Мудрости <strong>Сл 14</strong>. Провал: не может использовать реакции + помеха на следующую атаку.</div> <div class=\"uses-tracker\" style=\"margin-top:8px\"> <div class=\"use-pip\" onclick=\"togglePip(this)\" style=\"background:var(--color-accent);border-color:var(--color-accent)\"></div> </div> </div> <div class=\"section-title\">Преимущества в этом приключении</div> <div class=\"adv-list\"> <div class=\"adv-item\"><span class=\"adv-icon\">🗣</span><span>Говорит с Егором Клетью</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🏚</span><span>Осматривает камеру Тихона</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🔍</span><span>Определяет ложное признание</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">😤</span><span>Давит на стражника или приказчика</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">🚪</span><span>Удерживает проход в подземелье</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">⚖️</span><span>Защищает Тихона на суде</span></div> <div class=\"adv-item\"><span class=\"adv-icon\">👨‍⚖️</span><span>Спорит с воеводой о цене неправой казни</span></div> </div> <div class=\"section-title\">Подсказки игроку</div> <div class=\"tips-list\"> <div class=\"tip-item\">🏚 <strong>Тихон — твоя личная сцена:</strong> ты знаешь, как выглядит сломанная воля.</div> <div class=\"tip-item\">⛏ <strong>В подземелье:</strong> стой впереди и закрывай проход.</div> <div class=\"tip-item\">⚖️ <strong>На суде:</strong> не просто бей — ломай ложное признание и защищай обвиняемого.</div> </div> <div class=\"section-title\">История</div> <div class=\"notes-box\">Много лет служил при уездной тюрьме. Видел, как люди признаются под пыткой, под страхом, под голодом, под чужим приказом. Однажды отказался выбивать признание из человека, которого считал невиновным. За это его списали как ненадёжного. Опричнина подобрала его не за мягкость, а за редкое качество: он знает, где кончается вина и начинается сломанная воля.</div> <div class=\"footer\"> <span class=\"footer-hint\">HP меняется кнопками · пипки умений кликабельны</span> <span class=\"export-date\">Пять дней до петли · 2026</span> </div> </article></body></html>"
+    }
+  }
+}

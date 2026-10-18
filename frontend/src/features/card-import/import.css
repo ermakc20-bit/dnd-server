@@ -1,0 +1,39 @@
+.import-panel { display: grid; gap: 18px; min-width: 0; max-width: 900px; margin: 0 auto; padding-bottom: 4px; }
+.import-heading { display: flex; align-items: center; gap: 24px; padding-block: 16px; }
+.import-heading > div { flex: 1; min-width: 0; }
+.import-heading h2 { font-family: var(--font-display); font-size: 24px; line-height: 1.45; font-weight: 500; letter-spacing: -.035em; margin: 4px 0 12px; text-wrap: balance; }
+.import-heading p { margin: 0; color: var(--muted); line-height: 1.65; }
+.import-panel h3 { font-size: 15px; margin: 0; }
+.import-panel p { line-height: 1.65; }
+.import-panel label { display: grid; gap: 7px; font-size: 12px; }
+.import-panel label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.import-panel input, .import-panel textarea, .import-panel button { max-width: 100%; }
+.import-panel textarea { min-height: 180px; }
+.import-panel button { white-space: normal; }
+.import-source { display: grid; gap: 20px; padding: 20px; border: 1px solid var(--border); border-radius: 8px; }
+.import-source > div:not(.segmented-control) { display: grid; gap: 14px; }
+.import-source button { justify-self: start; }
+.import-source > div:not(.segmented-control) > button { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
+.import-source > div:not(.segmented-control) > button:hover:not(:disabled) { background: var(--accent-hover); }
+.segmented-control { display: inline-flex; gap: 3px; padding: 3px; background: var(--bg); border-radius: 7px; justify-self: start; }
+.segmented-control button { background: transparent; border-color: transparent; min-height: 32px; }
+.segmented-control button[aria-pressed="true"] { background: var(--surface-raised); color: var(--text); box-shadow: 0 1px 4px #243b281a; }
+.import-reference { padding-bottom: 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.7; }
+.import-reference summary { font-weight: 500; }
+.import-reference > details { margin-top: 14px; }
+.import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-reference .import-actions { margin-block: 12px; }
+.import-limits, .import-panel small { color: var(--muted); font-size: 11px; }
+.import-fragments { display: grid; gap: 8px; min-width: 0; padding: 14px; background: var(--field); border-radius: 6px; }
+.import-fragments pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.import-drafts { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.import-drafts > li { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; padding: 24px 0; border-bottom: 1px solid var(--border); }
+.import-drafts h3, .import-drafts p, .import-drafts details, .import-drafts .import-fragments { grid-column: 1 / -1; }
+.import-drafts small { overflow-wrap: anywhere; }
+.import-drafts details, .import-diagnostics { overflow-wrap: anywhere; font-size: 12px; }
+.import-panel [role="alert"] { color: var(--danger); }
+.import-diagnostics { color: var(--accent); background: var(--accent-soft); padding: 12px 12px 12px 28px; border-radius: 6px; }
+.import-confirm { position: sticky; bottom: -20px; padding: 16px 0; background: var(--surface); border-top: 1px solid var(--border); }
+@media (max-width: 600px) { .import-drafts > li { grid-template-columns: 1fr; } .import-heading { gap: 12px; } .import-heading .library-art { width: 90px; height: 90px; } .import-heading h2 { font-size: 19px; } }
+
+.import-panel > button { justify-self: start; }

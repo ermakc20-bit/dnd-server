@@ -1,0 +1,16 @@
+begin;
+select plan(12);
+select has_column('app','scenes','fog','manual fog durable state');
+select has_table('app','scene_annotations','durable annotation tombstones');
+select has_table('app','dice_rolls','durable server dice');
+select has_column('app','scene_annotations','deleted_at','deletion leaves tombstone');
+select has_column('app','room_events','undo_state','inverse is stored beside immutable event');
+select ok(not has_table_privilege('authenticated','app.scene_annotations','insert'),'browser cannot create annotations');
+select ok(not has_table_privilege('authenticated','app.dice_rolls','insert'),'browser cannot forge rolls');
+select ok(not has_table_privilege('anon','app.dice_rolls','select'),'anon cannot read private rolls');
+select ok((select relrowsecurity from pg_class where oid='app.scene_annotations'::regclass),'annotations RLS');
+select ok((select relrowsecurity from pg_class where oid='app.dice_rolls'::regclass),'dice RLS');
+select ok((select condeferrable and condeferred from pg_constraint where conname='scene_annotations_owner_participant_id_campaign_id_fkey'),'annotation cascade safe deferred owner FK');
+select ok(exists(select 1 from pg_trigger where tgrelid='app.room_events'::regclass and tgname='room_events_immutable' and not tgisinternal),'history append only trigger');
+select * from finish();
+rollback;

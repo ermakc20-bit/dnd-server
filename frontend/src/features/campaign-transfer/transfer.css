@@ -1,0 +1,6 @@
+.transfer-panel { margin-block: 16px; min-width: 0; }
+.transfer-body { padding: 18px; border-radius: 8px; background: var(--field); color: var(--text); margin-top: 12px; }
+.transfer-body p { line-height: 1.6; color: var(--muted); font-size: 12px; }
+.transfer-body label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 12px; font-size: 12px; }
+.transfer-body input[type="file"] { width: 100%; min-width: 0; color: inherit; background: var(--surface); }
+.transfer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 16px; }

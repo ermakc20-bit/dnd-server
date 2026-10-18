@@ -1,0 +1,104 @@
+.campaign-page { min-height: 100dvh; padding: 40px; color: var(--text); background: var(--bg); font-size: 14px; line-height: 1.5; }
+.campaign-page--center { display: grid; place-items: center; }
+.campaign-home { max-width: 1440px; margin: 0 auto; padding: 0 48px 64px; }
+.workspace-nav { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--border); }
+.workspace-nav a { display: inline-flex; align-items: center; gap: 9px; color: var(--text); text-decoration: none; font-weight: 600; font-size: 14px; }
+.workspace-nav a svg { color: var(--accent); }
+.workspace-nav > span { color: var(--muted); font-size: 12px; }
+.campaign-header { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 42px 0 30px; }
+.campaign-header h1 { margin: 0; font-family: var(--font-display); font-size: clamp(26px,3vw,38px); font-weight: 500; letter-spacing: -.035em; line-height: 1.25; text-wrap: balance; }
+.campaign-header p { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+.campaign-header-actions { display: flex; flex-direction: row-reverse; gap: 8px; align-items: flex-start; flex-wrap: wrap; max-width: 55%; }
+.campaign-header-actions .transfer-panel { flex: 1 1 190px; margin: 0; max-width: 420px; }
+.campaign-header-actions .transfer-body { margin-top: 12px; }
+.campaign-page button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border: 1px solid transparent; border-radius: 8px; padding: 9px 14px; color: var(--accent-ink); background: var(--accent); font-weight: 600; font-size: 13px; cursor: pointer; }
+.campaign-page button:hover:not(:disabled) { background: var(--accent-hover); }
+.campaign-page .button-secondary { color: var(--text); background: var(--surface); border-color: var(--border); }
+.campaign-page .button-secondary:hover:not(:disabled) { background: var(--surface-raised); }
+.campaign-grid { display: grid; grid-template-columns: 1fr; align-items: start; gap: 28px; }
+.campaign-card { min-width: 0; overflow-wrap: anywhere; overflow: clip; background: var(--surface); border-radius: 16px; }
+.campaign-card-visual { min-height: 390px; position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: center; background: #0a131a; }
+.campaign-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; z-index: -2; transition: transform 600ms var(--ease-out); }
+.campaign-card-visual::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, #0a131af0 0%, #0a131ac7 30%, #0a131a00 68%); }
+.campaign-card:hover .campaign-cover { transform: scale(1.025); }
+.campaign-card-content { padding: 40px; width: min(640px,65%); }
+.campaign-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; }
+.campaign-status { padding: 3px 7px; border-radius: 4px; color: #c5d1dc; background: #1b2730; font-size: 11px; font-weight: 500; }
+.campaign-status--active { color: var(--accent); background: var(--accent-soft); }
+.campaign-meta { margin: 0; color: #c5d1dc; font-size: 12px; }
+.campaign-card h2 { margin: 0; font-family: var(--font-display); font-size: clamp(24px,3vw,36px); line-height: 1.35; letter-spacing: -.035em; font-weight: 500; text-wrap: balance; color: #f0f1f4; }
+.campaign-room-count { margin: 16px 0 24px; color: #c5d1dc; font-size: 12px; }
+.campaign-room-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.campaign-room-links button { min-width: 220px; justify-content: space-between; text-align: left; padding: 11px 16px; gap: 24px; }
+.campaign-room-links button svg { transition: transform 160ms var(--ease-out); }
+.campaign-room-links button:hover:not(:disabled) svg { transform: translateX(3px); }
+.campaign-room-name { display: block; margin-top: 3px; color: #4c3822; font-size: 11px; font-weight: 400; }
+.campaign-settings { border-top: 1px solid var(--border); }
+.campaign-settings > summary { display: flex; align-items: center; gap: 8px; list-style: none; padding: 15px 24px; color: var(--muted); cursor: pointer; font-size: 12px; }
+.campaign-settings > summary::-webkit-details-marker { display: none; }
+.campaign-settings > summary > svg:last-child { margin-left: auto; transition: transform 160ms var(--ease-out); }
+.campaign-settings[open] > summary > svg:last-child { transform: rotate(90deg); }
+.campaign-settings > summary:hover { background: var(--surface-raised); color: var(--text); }
+.campaign-settings-body { padding: 12px 24px 28px; }
+.campaign-next-steps { color: var(--muted); font-size: 13px; }
+.campaign-next-steps ol { padding-left: 20px; line-height: 1.8; }
+.room-admin { display: grid; gap: 16px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.room-admin h3, .room-admin p, .room-admin h4 { margin: 0; }
+.room-admin h3 { font-size: 16px; }
+.room-admin h4 { font-size: 13px; font-weight: 600; }
+.room-admin p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.room-admin label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.room-admin ul { display: grid; gap: 8px; padding: 0; list-style: none; }
+.room-admin ul:empty { display: none; }
+.room-admin li { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.room-admin li > ul { width: 100%; margin: 0; }
+.room-admin .campaign-actions { margin: 0; gap: 6px; }
+.room-admin button { font-size: 12px; }
+.access-section { display: grid; gap: 12px; padding: 16px 0; border-top: 1px solid var(--border); }
+.invite-link { overflow-wrap: anywhere; padding: 12px; border-radius: 6px; color: var(--accent); background: var(--accent-soft); font-size: 12px; }
+.campaign-form, .guest-card { width: min(100%, 480px); padding: 32px; border-radius: 16px; background: var(--surface); }
+.campaign-form { margin: 0 0 32px; }
+.campaign-form h2, .guest-card h1 { margin: 0 0 14px; font-family: var(--font-display); font-size: 24px; font-weight: 500; line-height: 1.4; letter-spacing: -.035em; text-wrap: balance; }
+.campaign-form label, .guest-card label { display: grid; gap: 8px; margin-top: 22px; color: var(--muted); font-size: 13px; }
+.guest-options { display: grid; gap: 16px; width: min(100%, 480px); }
+.guest-options .guest-card { width: 100%; }
+.guest-card > p { color: var(--muted); line-height: 1.7; }
+.guest-card > button { width: 100%; margin-top: 24px; }
+.guest-card--account { border-top: 1px solid var(--border); background: var(--field); }
+.guest-card--account h2 { font-size: 16px; font-weight: 550; }
+.journey-entry { position: relative; isolation: isolate; place-items: center start; padding: clamp(24px,6vw,80px); }
+.journey-entry::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(90deg, var(--bg), #10131980 42%, #10131900 68%), url('/art/adventure-cover.jpg') center right / cover no-repeat; }
+.journey-entry .guest-card { box-shadow: 0 16px 48px #0005; }
+.campaign-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.campaign-error { padding: 12px 16px; border-radius: 6px; color: var(--danger); background: var(--danger-soft); }
+.campaign-empty { min-height: 390px; padding: 64px 40px; text-align: left; border-radius: 16px; background: linear-gradient(90deg,#0a131af0,#0a131ab3 38%,#0a131a00 75%), url('/art/adventure-cover.jpg') center / cover; }
+.campaign-empty h2 { max-width: 460px; font-family: var(--font-display); font-size: clamp(26px,3vw,36px); font-weight: 500; line-height: 1.4; margin: 0 0 16px; letter-spacing: -.035em; text-wrap: balance; }
+.campaign-empty p { max-width: 360px; color: #c5d1dc; line-height: 1.7; margin-bottom: 24px; }
+.phone-notice { color: var(--muted); }
+@media (max-width: 900px) {
+  .campaign-home { padding-inline: 24px; }
+  .campaign-header { flex-direction: column; align-items: flex-start; gap: 20px; padding-top: 32px; }
+  .campaign-header-actions { max-width: 100%; width: 100%; flex-direction: row; }
+  .campaign-header-actions .transfer-panel { flex: 0 1 auto; }
+  .campaign-card-content { width: 70%; padding: 32px; }
+}
+@media (max-width: 540px) {
+  .campaign-page { padding: 24px 16px; }
+  .campaign-home { padding-top: 0; }
+  .workspace-nav { min-height: 56px; }
+  .workspace-nav > span { display: none; }
+  .campaign-header h1 { font-size: 26px; }
+  .campaign-card-visual { min-height: 450px; align-items: flex-end; }
+  .campaign-cover { object-position: 69% center; }
+  .campaign-card-visual::before { background: linear-gradient(0deg,#0a131afc 3%,#0a131acc 40%,#0a131a00 85%); }
+  .campaign-card-content { width: 100%; padding: 26px 22px; }
+  .campaign-card h2 { font-size: 25px; }
+  .campaign-facts { margin-bottom: 12px; }
+  .campaign-room-links button { width: 100%; }
+  .campaign-settings > summary { padding-inline: 22px; }
+  .campaign-settings-body { padding: 8px 22px 22px; }
+  .campaign-form, .guest-card { padding: 24px; }
+  .journey-entry { padding-top: 140px; place-items: start center; }
+  .journey-entry::before { background: linear-gradient(0deg,var(--bg) 20%,#10131900 100%),url('/art/adventure-cover.jpg') 70% top / auto 420px no-repeat; }
+  .campaign-empty { padding: 180px 24px 32px; background-position: 70% center; }
+}

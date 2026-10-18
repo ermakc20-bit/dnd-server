@@ -1,0 +1,14 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(9);
+select has_table('app','import_jobs','Private import jobs exist');
+select col_type_is('app','import_jobs','source_bytes','bytea','Source is bounded binary');
+select col_type_is('app','import_jobs','draftset','jsonb','Drafts persist as canonical JSON');
+select ok((select relrowsecurity from pg_class where oid='app.import_jobs'::regclass),'RLS enabled');
+select ok(not has_table_privilege('anon','app.import_jobs','SELECT'),'Anon cannot read sources');
+select ok(not has_table_privilege('authenticated','app.import_jobs','SELECT'),'Auth Data API cannot read sources');
+select ok(not has_table_privilege('authenticated','app.import_jobs','INSERT'),'Auth Data API cannot create jobs');
+select ok(not has_table_privilege('authenticated','app.import_jobs','UPDATE'),'Auth Data API cannot confirm jobs');
+select ok(not has_table_privilege('authenticated','app.import_jobs','DELETE'),'Auth Data API cannot delete jobs');
+select * from finish();
+rollback;

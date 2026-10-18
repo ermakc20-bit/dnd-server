@@ -63,7 +63,7 @@ command model.
 - `AC-SECURITY`: `make security-static` and configuration redaction tests.
 - `AC-QUALITY`: `make verify`.
 - `AC-OPS`: `docker compose config`.
-- `AC-TRACE`: Development OS `validate-spec.mjs` output.
+- `AC-TRACE`: repository-local `scripts/validate_spec.py --spec docs/specs/VTT-001-foundation.md` output and `pytest tests/test_validation.py` negative fixtures; project manifest is checked by `scripts/validate_project.py --manifest .ai-studio/project.yaml` in `make verify`.
 
 ## Verification commands
 
@@ -81,3 +81,27 @@ command model.
 This slice creates only a new schema. It does not import legacy data. Rollback
 removes the new local environment or redeploys the prior immutable image. The
 legacy tag remains available for audit and import development.
+
+
+## F3 private room security boundary
+
+The runtime room aggregate uses private `app.room_security_events`, introduced
+by append migration `20261015120000_room_security_journal.sql`. Existing foundation
+`public.security_events` and gameplay `app.room_events` retain their contracts.
+The new table stores a real same-room participant, server time, a bounded safe
+reason and one joined/opened/closed type, with no payload, credentials or session
+identifier. Its room-bound foreign key prevents invented and cross-room actors.
+Service-role ACL permits only select/insert and identity-sequence usage; anon and
+authenticated Data API roles have no audit grants. RLS has only service read and
+append policies. Membership joins append in the existing transaction; observed
+authorized WebSocket open/close appends are durable and independent of gameplay
+versions/cursors/history/export. HTTP reads require current MANAGE_ROOM.
+
+The migration leaves the previous ten DDL files immutable. The dedicated schema
+suite `supabase/tests/room_security_journal.sql` checks private access, safe columns,
+server time, actor FK and no gameplay version/cursor effect. Runtime proof is
+actual HTTP joins and authorized socket lifetime in
+`tests/test_room_security_journal.py` and
+`tests/realtime/test_presence_security_journal.py`; inserting an audit fixture
+row alone is not evidence of runtime audit. Fresh replay uses a new owned local
+database with exact finally drop/read-back, never an existing database reset.

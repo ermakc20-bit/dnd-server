@@ -24,9 +24,9 @@ select is(
     join pg_namespace as namespace on namespace.oid = relation.relnamespace
     where namespace.nspname = 'app'
       and relation.relkind = 'r'
-      and relation.relrowsecurity
+      and not relation.relrowsecurity
   ),
-  11::bigint,
+  0::bigint,
   'RLS is enabled on every application table'
 );
 

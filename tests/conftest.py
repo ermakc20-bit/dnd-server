@@ -10,7 +10,15 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(environment="test")
+    return Settings(
+        environment="test",
+        supabase_url=None,
+        supabase_publishable_key=None,
+        supabase_service_role_key=None,
+        database_url=None,
+        redis_url=None,
+        _env_file=None,
+    )
 
 
 @pytest.fixture
